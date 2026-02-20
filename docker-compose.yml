@@ -10,9 +10,11 @@ services:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
     volumes:
       - wp_db_data:/var/lib/mysql
+    networks:
+      - wp_internal
 
   wordpress:
-    image: ghcr.io/${GHCR_OWNER}/${GHCR_IMAGE}:latest
+    image: ghcr.io/danieleramacci/sito-easydigital:latest
     container_name: easydigital-wordpress
     depends_on:
       - db
@@ -45,9 +47,11 @@ services:
       - traefik.http.middlewares.easydigital-sec-headers.headers.contentTypeNosniff=true
       - traefik.http.routers.easydigital-secure.middlewares=easydigital-sec-headers
     networks:
+      - wp_internal
       - gruppo_proxy
 
 networks:
+  wp_internal:
   gruppo_proxy:
     external: true
     name: gruppo_proxy
