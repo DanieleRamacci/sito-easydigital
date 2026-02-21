@@ -1,4 +1,4 @@
-slug: servizi-digital-agency
+slug: consulenza-digital-agency
 title: Servizi Digital Agency
 card_title: Servizi Digital Agency
 excerpt: Sviluppiamo una strategia digitale completa: sito web, SEO, advertising, automazioni e supporto tecnico continuativo.

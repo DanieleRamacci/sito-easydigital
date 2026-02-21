@@ -140,6 +140,10 @@ for file in "${SERVICES_DIR}"/*.md; do
     echo "Skipping ${file}: missing slug or title"
     continue
   fi
+  if [[ "${slug}" == "${SERVICES_PARENT_SLUG}" ]]; then
+    echo "Skipping ${file}: slug '${slug}' conflicts with parent page slug '${SERVICES_PARENT_SLUG}'"
+    continue
+  fi
 
   if [[ -z "${card_title}" ]]; then
     card_title="${title}"
