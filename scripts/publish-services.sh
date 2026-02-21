@@ -129,6 +129,8 @@ for file in "${SERVICES_DIR}"/*.md; do
   cta_primary_url="$(get_meta "${file}" "cta_primary_url")"
   hero_services_title="$(get_meta "${file}" "hero_services_title")"
   service_included_list="$(get_meta "${file}" "service_included_list")"
+  context_title="$(get_meta "${file}" "context_title")"
+  context_intro="$(get_meta "${file}" "context_intro")"
   seo_title="$(get_meta "${file}" "seo_title")"
   seo_description="$(get_meta "${file}" "seo_description")"
   ai_prompt="$(get_meta "${file}" "ai_prompt")"
@@ -163,6 +165,12 @@ for file in "${SERVICES_DIR}"/*.md; do
   if [[ -z "${service_included_list}" ]]; then
     service_included_list="<div class=\"eda-service-item\"><div class=\"eda-service-item-left\"><span class=\"eda-service-bullet\"></span><span class=\"eda-service-label\">Analisi iniziale</span></div><span class=\"eda-service-tag\">Start</span></div><div class=\"eda-service-item\"><div class=\"eda-service-item-left\"><span class=\"eda-service-bullet\"></span><span class=\"eda-service-label\">Implementazione</span></div><span class=\"eda-service-tag\">Operativo</span></div><div class=\"eda-service-item\"><div class=\"eda-service-item-left\"><span class=\"eda-service-bullet\"></span><span class=\"eda-service-label\">Ottimizzazione continua</span></div><span class=\"eda-service-tag\">Growth</span></div>"
   fi
+  if [[ -z "${context_title}" ]]; then
+    context_title="Perche investire in questo servizio"
+  fi
+  if [[ -z "${context_intro}" ]]; then
+    context_intro="Ogni progetto digitale ha bisogno di una base tecnica solida, contenuti chiari e obiettivi misurabili. Con questo servizio trasformiamo il sito in uno strumento di crescita, non in una semplice vetrina."
+  fi
   if [[ -z "${seo_title}" ]]; then
     seo_title="${title}"
   fi
@@ -185,6 +193,8 @@ for file in "${SERVICES_DIR}"/*.md; do
   page_content="${page_content//__CTA_PRIMARY_URL__/${cta_primary_url}}"
   page_content="${page_content//__HERO_SERVICES_TITLE__/${hero_services_title}}"
   page_content="${page_content//__SERVICE_INCLUDED_LIST__/${service_included_list}}"
+  page_content="${page_content//__CONTEXT_TITLE__/${context_title}}"
+  page_content="${page_content//__CONTEXT_INTRO__/${context_intro}}"
   page_content="${page_content//__SEO_TITLE__/${seo_title_escaped}}"
   page_content="${page_content//__SEO_DESCRIPTION__/${seo_description_escaped}}"
   page_content="${page_content//__SERVICES_PARENT_SLUG__/${SERVICES_PARENT_SLUG}}"
@@ -197,6 +207,7 @@ for file in "${SERVICES_DIR}"/*.md; do
 <article class=\"eda-service-card\">
   <header class=\"eda-service-card-head\">
     <h3>${card_title}</h3>
+    <span class=\"eda-service-card-divider\"></span>
   </header>
   <div class=\"eda-service-card-body\">
     <p>${excerpt}</p>
