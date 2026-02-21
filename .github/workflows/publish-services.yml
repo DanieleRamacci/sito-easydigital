@@ -1,0 +1,40 @@
+name: Publish Services Pages
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "content/services/**"
+      - "content/templates/**"
+      - "scripts/publish-services.sh"
+      - ".github/workflows/publish-services.yml"
+  workflow_dispatch:
+
+jobs:
+  publish-services:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      WP_BASE_URL: ${{ secrets.WP_BASE_URL }}
+      WP_USERNAME: ${{ secrets.WP_USERNAME }}
+      WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
+      SERVICES_PARENT_SLUG: ${{ vars.SERVICES_PARENT_SLUG || 'servizi-digital-agency' }}
+      SERVICES_PARENT_TITLE: ${{ vars.SERVICES_PARENT_TITLE || 'I Servizi Web Agency Digital a Roma' }}
+      SERVICES_PARENT_INTRO: ${{ vars.SERVICES_PARENT_INTRO || 'Scopri i servizi digitali pensati per far crescere il tuo business online.' }}
+      DEFAULT_PAGE_STATUS: ${{ vars.DEFAULT_PAGE_STATUS || 'draft' }}
+      PARENT_PAGE_STATUS: ${{ vars.PARENT_PAGE_STATUS || 'publish' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate required secrets
+        run: |
+          test -n "${WP_BASE_URL}" || (echo "Missing secret: WP_BASE_URL" && exit 1)
+          test -n "${WP_USERNAME}" || (echo "Missing secret: WP_USERNAME" && exit 1)
+          test -n "${WP_APP_PASSWORD}" || (echo "Missing secret: WP_APP_PASSWORD" && exit 1)
+
+      - name: Publish pages
+        run: |
+          chmod +x scripts/publish-services.sh
+          ./scripts/publish-services.sh

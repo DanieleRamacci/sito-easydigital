@@ -1,4 +1,6 @@
 .env
+content/.publish.env
+content/services/_generated-*.html
 *.sql
 *.tar
 .DS_Store
