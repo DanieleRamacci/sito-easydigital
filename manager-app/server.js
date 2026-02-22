@@ -24,9 +24,11 @@ const SMTP_USER = process.env.SMTP_USER || '';
 const SMTP_PASS = process.env.SMTP_PASS || '';
 const SMTP_FROM = process.env.SMTP_FROM || '';
 
+const JOB_STATUS_OPTIONS = ['aperta', 'call_fissata', 'preventivo_inviato', 'attiva', 'chiusa_acquisita', 'chiusa_persa'];
+
 ensureStore();
 
-app.get('/health', (_, res) => res.json({ ok: true, app: 'eda-manager' }));
+app.get('/health', (_req, res) => res.json({ ok: true, app: 'eda-manager' }));
 
 app.get(['/gestionale/auth/callback', '/areapersonale/auth/callback'], (req, res) => {
   const token = req.query.token;
@@ -49,7 +51,7 @@ app.get(['/gestionale/auth/callback', '/areapersonale/auth/callback'], (req, res
   }
 });
 
-app.get('/logout', (req, res) => {
+app.get('/logout', (_req, res) => {
   res.clearCookie(SESSION_COOKIE, { path: '/' });
   res.redirect('/areapersonale');
 });
@@ -63,6 +65,8 @@ app.get('/areapersonale/invito', (req, res) => {
   }
 
   if (invite.expiresAt && new Date(invite.expiresAt) < new Date()) {
+    invite.status = 'expired';
+    writeStore(store);
     return res.send(renderPublicPage('Invito scaduto', '<p>Il link e scaduto. Chiedi un nuovo invito.</p>'));
   }
 
@@ -231,17 +235,30 @@ app.use('/gestionale', requireAdmin);
 
 app.get('/gestionale', (req, res) => {
   const store = readStore();
-  const renew90 = upcomingRenewals(store, 90);
+  const renewals = chronologicalRenewals(store);
+  const jobs = [...store.jobs].sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
 
   const body = `
     <h1>Gestionale - Dashboard</h1>
     <div class="kpi-grid">
       ${kpi('Clienti', String(store.customers.length))}
       ${kpi('Servizi catalogo', String(store.services.length))}
-      ${kpi('Servizi attivi', String(store.subscriptions.filter((s) => s.status === 'active').length))}
-      ${kpi('Rinnovi entro 90gg', String(renew90.length))}
+      ${kpi('Commesse aperte', String(store.jobs.filter((j) => !j.status.startsWith('chiusa_')).length))}
+      ${kpi('Rinnovi totali', String(renewals.length))}
       ${kpi('Ticket aperti', String(store.tickets.filter((t) => t.status !== 'closed').length))}
     </div>
+
+    <section class="card">
+      <details>
+        <summary><strong>Pipeline lavori/commesse</strong> (${jobs.length})</summary>
+        <div style="margin-top:12px">${renderJobsTable(jobs, store.customers, store.services, true)}</div>
+      </details>
+    </section>
+
+    <section class="card">
+      <h2>Rinnovi in ordine cronologico</h2>
+      ${renderRenewalsTable(renewals, store.services)}
+    </section>
   `;
   res.send(renderAppLayout('Gestionale', body, req.user, true));
 });
@@ -272,18 +289,26 @@ app.post('/gestionale/servizi/new', (req, res) => {
 
 app.get('/gestionale/clienti', (req, res) => {
   const store = readStore();
-  const serviceOptions = store.services
-    .map((s) => `<option value="${s.id}">${esc(s.name)} (${labelBilling(s.billingType, s.billingInterval)})</option>`)
-    .join('');
-  const customerOptions = store.customers
-    .map((c) => `<option value="${c.id}">${esc(c.company || `${c.firstName} ${c.lastName}`)} - ${esc(c.email)}</option>`)
-    .join('');
-
   const body = `
     <h1>Clienti</h1>
+    <section class="card row-between">
+      <p>Gestisci anagrafiche, inviti, servizi e storico rinnovi.</p>
+      <a class="btn-link" href="/gestionale/clienti/new">+ Aggiungi cliente</a>
+    </section>
 
     <section class="card">
-      <h2>Nuovo cliente (invio invito)</h2>
+      <h2>Tabella clienti</h2>
+      ${renderCustomersTable(store)}
+    </section>
+  `;
+  res.send(renderAppLayout('Gestionale - Clienti', body, req.user, true));
+});
+
+app.get('/gestionale/clienti/new', (req, res) => {
+  const body = `
+    <h1>Nuovo cliente</h1>
+    <section class="card">
+      <h2>Anagrafica cliente e invito</h2>
       <form method="post" action="/gestionale/clienti/new" class="form-grid two-col">
         <input type="text" name="company" placeholder="Azienda" required />
         <input type="text" name="vat" placeholder="Partita IVA" />
@@ -297,68 +322,8 @@ app.get('/gestionale/clienti', (req, res) => {
         <button type="submit">Crea cliente e genera link invito</button>
       </form>
     </section>
-
-    <section class="card">
-      <h2>Assegna servizio al cliente</h2>
-      <form method="post" action="/gestionale/clienti/assign" class="form-grid two-col">
-        <select name="customerId" required>
-          <option value="">Seleziona cliente</option>
-          ${customerOptions}
-        </select>
-        <select name="serviceId">
-          <option value="">Crea nuovo servizio al volo</option>
-          ${serviceOptions}
-        </select>
-
-        <input name="newServiceName" type="text" placeholder="Nuovo servizio: nome (se non selezioni dal catalogo)" />
-        <input name="newServicePrice" type="number" step="0.01" min="0" placeholder="Nuovo servizio: prezzo" />
-
-        <select name="newServiceBillingType">
-          <option value="one_time">Nuovo servizio: una tantum</option>
-          <option value="subscription">Nuovo servizio: abbonamento</option>
-        </select>
-        <select name="newServiceBillingInterval">
-          <option value="monthly">Nuovo servizio: mensile</option>
-          <option value="semiannual">Nuovo servizio: semestrale</option>
-          <option value="annual">Nuovo servizio: annuale</option>
-        </select>
-
-        <input type="date" name="purchaseDate" required />
-        <select name="billingTypeOverride">
-          <option value="auto">Tipo fatturazione: auto da servizio</option>
-          <option value="one_time">Una tantum</option>
-          <option value="subscription">Abbonamento</option>
-        </select>
-
-        <select name="billingIntervalOverride">
-          <option value="auto">Periodo rinnovo: auto da servizio</option>
-          <option value="monthly">Mensile</option>
-          <option value="semiannual">Semestrale</option>
-          <option value="annual">Annuale</option>
-        </select>
-        <select name="status">
-          <option value="active">Attivo</option>
-          <option value="expired">Scaduto</option>
-          <option value="cancelled">Annullato</option>
-        </select>
-
-        <textarea name="notes" rows="2" placeholder="Note servizio"></textarea>
-        <button type="submit">Assegna servizio</button>
-      </form>
-    </section>
-
-    <section class="card">
-      <h2>Anagrafiche clienti</h2>
-      ${renderCustomersTable(store)}
-    </section>
-
-    <section class="card">
-      <h2>Lista clienti / servizi</h2>
-      ${renderAdminSubscriptions(store)}
-    </section>
   `;
-
-  res.send(renderAppLayout('Gestionale - Clienti', body, req.user, true));
+  res.send(renderAppLayout('Gestionale - Nuovo Cliente', body, req.user, true));
 });
 
 app.post('/gestionale/clienti/new', async (req, res) => {
@@ -369,13 +334,13 @@ app.post('/gestionale/clienti/new', async (req, res) => {
   const phone = (req.body.phone || '').trim();
 
   if (!company || !firstName || !lastName || !email || !phone) {
-    return res.redirect('/gestionale/clienti');
+    return res.redirect('/gestionale/clienti/new');
   }
 
   const store = readStore();
   const existing = store.customers.find((c) => String(c.email || '').toLowerCase() === email);
   if (existing) {
-    return res.redirect('/gestionale/clienti');
+    return res.redirect(`/gestionale/clienti/${existing.id}`);
   }
 
   const customerId = nextId(store.customers);
@@ -411,59 +376,141 @@ app.post('/gestionale/clienti/new', async (req, res) => {
   store.invites.unshift(invite);
 
   const inviteUrl = `${WP_BASE_URL}/areapersonale/invito?token=${encodeURIComponent(inviteToken)}`;
-
-  if (SMTP_HOST && SMTP_USER && SMTP_PASS && SMTP_FROM) {
-    const transporter = nodemailer.createTransport({
-      host: SMTP_HOST,
-      port: SMTP_PORT,
-      secure: SMTP_PORT === 465,
-      auth: { user: SMTP_USER, pass: SMTP_PASS },
-      connectionTimeout: 7000,
-      greetingTimeout: 7000,
-      socketTimeout: 10000
-    });
-    const subject = '[Easy Digital Agency] Completa la tua registrazione';
-    const text = `Ciao ${customer.firstName},\n\nPer completare la registrazione alla tua area personale usa questo link:\n${inviteUrl}\n\nIl link scade il ${invite.expiresAt.slice(0, 10)}.\n\nEasy Digital Agency`;
-
-    // Non bloccare la risposta HTTP: invio email in background con timeout breve.
-    Promise.race([
-      transporter.sendMail({ from: SMTP_FROM, to: customer.email, subject, text }),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('SMTP timeout')), 12000))
-    ]).catch((e) => {
-      console.error('Invite mail error:', e.message);
-    });
-  }
+  maybeSendInviteEmail(customer, invite, inviteUrl);
 
   writeStore(store);
-  return res.redirect('/gestionale/clienti');
+  return res.redirect(`/gestionale/clienti/${customerId}`);
 });
 
-app.post('/gestionale/clienti/assign', (req, res) => {
+app.get('/gestionale/clienti/:id', (req, res) => {
   const store = readStore();
-  const customerId = Number(req.body.customerId || 0);
-  if (!customerId) return res.redirect('/gestionale/clienti');
+  const id = Number(req.params.id || 0);
+  const customer = store.customers.find((c) => Number(c.id) === id);
+  if (!customer) {
+    return res.status(404).send(renderPublicPage('Cliente non trovato', '<p>Cliente non trovato.</p>'));
+  }
 
+  const customerSubs = store.subscriptions.filter((s) => Number(s.customerId) === id);
+  const customerTickets = store.tickets.filter((t) => Number(t.customerId || 0) === id);
+  const customerJobs = store.jobs.filter((j) => Number(j.customerId || 0) === id);
+  const upcoming = customerSubs
+    .filter((s) => s.billingType === 'subscription' && s.renewalDate)
+    .sort((a, b) => String(a.renewalDate).localeCompare(String(b.renewalDate)));
+  const history = customerSubs
+    .filter((s) => s.renewalDate)
+    .sort((a, b) => String(b.renewalDate).localeCompare(String(a.renewalDate)));
+
+  const serviceOptions = store.services
+    .map((s) => `<option value="${s.id}">${esc(s.name)} (${labelBilling(s.billingType, s.billingInterval)})</option>`)
+    .join('');
+
+  const invite = store.invites.find((i) => i.customerId === id && i.status === 'pending');
+  const inviteLink = invite ? `${WP_BASE_URL}/areapersonale/invito?token=${invite.token}` : '';
+
+  const body = `
+    <h1>Cliente: ${esc(customer.company || `${customer.firstName} ${customer.lastName}`)}</h1>
+
+    <section class="card">
+      <h2>Dati cliente</h2>
+      <div class="two-col" style="display:grid;gap:10px;grid-template-columns:repeat(2,minmax(0,1fr));">
+        <p><strong>Azienda:</strong> ${esc(customer.company || '-')}</p>
+        <p><strong>Referente:</strong> ${esc(`${customer.firstName} ${customer.lastName}`.trim())}</p>
+        <p><strong>Email:</strong> ${esc(customer.email)}</p>
+        <p><strong>Telefono:</strong> ${esc(customer.phone || '-')}</p>
+        <p><strong>P.IVA:</strong> ${esc(customer.vat || '-')}</p>
+        <p><strong>Stato:</strong> ${esc(customer.status)}</p>
+        <p><strong>PEC:</strong> ${esc(customer.pec || '-')}</p>
+        <p><strong>SDI:</strong> ${esc(customer.sdi || '-')}</p>
+      </div>
+      ${inviteLink ? `<p><strong>Link invito attivo:</strong> <a href="${esc(inviteLink)}" target="_blank" rel="noopener">apri</a><br/><code>${esc(inviteLink)}</code></p>` : '<p>Nessun invito pendente.</p>'}
+    </section>
+
+    <section class="card">
+      <h2>Associa servizio</h2>
+      <form method="post" action="/gestionale/clienti/${id}/assign" class="form-grid two-col">
+        <select name="serviceId">
+          <option value="">Crea nuovo servizio al volo</option>
+          ${serviceOptions}
+        </select>
+        <input name="newServiceName" type="text" placeholder="Nuovo servizio: nome" />
+
+        <input name="newServicePrice" type="number" step="0.01" min="0" placeholder="Nuovo servizio: prezzo" />
+        <select name="newServiceBillingType">
+          <option value="one_time">Nuovo servizio: una tantum</option>
+          <option value="subscription">Nuovo servizio: abbonamento</option>
+        </select>
+
+        <select name="newServiceBillingInterval">
+          <option value="monthly">Nuovo servizio: mensile</option>
+          <option value="semiannual">Nuovo servizio: semestrale</option>
+          <option value="annual">Nuovo servizio: annuale</option>
+        </select>
+        <input type="date" name="purchaseDate" required />
+
+        <select name="billingTypeOverride">
+          <option value="auto">Tipo fatturazione: auto da servizio</option>
+          <option value="one_time">Una tantum</option>
+          <option value="subscription">Abbonamento</option>
+        </select>
+        <select name="billingIntervalOverride">
+          <option value="auto">Periodo rinnovo: auto da servizio</option>
+          <option value="monthly">Mensile</option>
+          <option value="semiannual">Semestrale</option>
+          <option value="annual">Annuale</option>
+        </select>
+
+        <select name="status">
+          <option value="active">Attivo</option>
+          <option value="expired">Scaduto</option>
+          <option value="cancelled">Annullato</option>
+        </select>
+        <textarea name="notes" rows="2" placeholder="Note servizio"></textarea>
+
+        <button type="submit">Associa servizio</button>
+      </form>
+    </section>
+
+    <section class="card">
+      <h2>Servizi associati</h2>
+      ${renderSubscriptionsTableForAdmin(customerSubs, store.services)}
+    </section>
+
+    <section class="card">
+      <h2>Prossimi rinnovi</h2>
+      ${renderRenewalsTable(upcoming, store.services)}
+    </section>
+
+    <section class="card">
+      <h2>Storico rinnovi/pagamenti</h2>
+      ${renderRenewalsTable(history, store.services)}
+    </section>
+
+    <section class="card">
+      <h2>Ticket cliente</h2>
+      ${renderAdminTickets(customerTickets, [customer])}
+    </section>
+
+    <section class="card">
+      <h2>Lavori/commesse cliente</h2>
+      ${renderJobsTable(customerJobs, store.customers, store.services, true)}
+    </section>
+  `;
+
+  res.send(renderAppLayout('Gestionale - Dettaglio Cliente', body, req.user, true));
+});
+
+app.post('/gestionale/clienti/:id/assign', (req, res) => {
+  const store = readStore();
+  const customerId = Number(req.params.id || 0);
   const customer = store.customers.find((c) => Number(c.id) === customerId);
   if (!customer) return res.redirect('/gestionale/clienti');
 
-  let serviceId = Number(req.body.serviceId || 0);
-
-  if (!serviceId) {
-    const created = createServiceFromRequest(store, {
-      name: req.body.newServiceName,
-      price: req.body.newServicePrice,
-      billingType: req.body.newServiceBillingType,
-      billingInterval: req.body.newServiceBillingInterval
-    });
-    if (!created) return res.redirect('/gestionale/clienti');
-    serviceId = created.id;
-  }
+  const serviceId = resolveServiceForAssignment(store, req.body);
+  if (!serviceId) return res.redirect(`/gestionale/clienti/${customerId}`);
 
   const service = store.services.find((s) => Number(s.id) === serviceId);
-  if (!service) return res.redirect('/gestionale/clienti');
-
   const purchaseDate = (req.body.purchaseDate || '').trim();
-  if (!purchaseDate) return res.redirect('/gestionale/clienti');
+  if (!service || !purchaseDate) return res.redirect(`/gestionale/clienti/${customerId}`);
 
   const billingType = deriveBillingType(req.body.billingTypeOverride, service.billingType);
   const billingInterval = deriveBillingInterval(req.body.billingIntervalOverride, service.billingInterval);
@@ -488,16 +535,140 @@ app.post('/gestionale/clienti/assign', (req, res) => {
   });
 
   writeStore(store);
-  res.redirect('/gestionale/clienti');
+  res.redirect(`/gestionale/clienti/${customerId}`);
+});
+
+app.get('/gestionale/lavori', (req, res) => {
+  const store = readStore();
+  const body = `
+    <h1>Lavori / Commesse</h1>
+    <section class="card row-between">
+      <p>Pipeline commerciale e operativa delle richieste clienti.</p>
+      <a class="btn-link" href="/gestionale/lavori/new">+ Nuova commessa</a>
+    </section>
+
+    <section class="card">
+      ${renderJobsTable(store.jobs, store.customers, store.services, true)}
+    </section>
+  `;
+  res.send(renderAppLayout('Gestionale - Lavori', body, req.user, true));
+});
+
+app.get('/gestionale/lavori/new', (req, res) => {
+  const store = readStore();
+  const customerOptions = store.customers.map((c) => `<option value="${c.id}">${esc(c.company || `${c.firstName} ${c.lastName}`)} - ${esc(c.email)}</option>`).join('');
+  const serviceOptions = store.services.map((s) => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
+  const body = `
+    <h1>Nuova commessa</h1>
+    <section class="card">
+      <form method="post" action="/gestionale/lavori/new" class="form-grid two-col">
+        <input type="text" name="title" placeholder="Titolo lavoro/commessa" required />
+        <select name="status" required>${JOB_STATUS_OPTIONS.map((s) => `<option value="${s}">${esc(labelJobStatus(s))}</option>`).join('')}</select>
+
+        <select name="customerId"><option value="">Seleziona cliente esistente</option>${customerOptions}</select>
+        <input type="text" name="newCustomerCompany" placeholder="Oppure nuova azienda" />
+
+        <input type="text" name="newCustomerFirstName" placeholder="Nuovo cliente: nome referente" />
+        <input type="text" name="newCustomerLastName" placeholder="Nuovo cliente: cognome referente" />
+
+        <input type="email" name="newCustomerEmail" placeholder="Nuovo cliente: email" />
+        <input type="text" name="newCustomerPhone" placeholder="Nuovo cliente: telefono" />
+
+        <select name="serviceId"><option value="">Servizio collegato (opzionale)</option>${serviceOptions}</select>
+        <input type="date" name="dueDate" />
+
+        <input type="number" name="amount" step="0.01" min="0" placeholder="Importo previsto" />
+        <textarea name="notes" rows="3" placeholder="Note richiesta cliente"></textarea>
+
+        <button type="submit">Crea commessa</button>
+      </form>
+    </section>
+  `;
+  res.send(renderAppLayout('Gestionale - Nuova Commessa', body, req.user, true));
+});
+
+app.post('/gestionale/lavori/new', (req, res) => {
+  const store = readStore();
+  let customerId = Number(req.body.customerId || 0);
+
+  if (!customerId) {
+    const company = (req.body.newCustomerCompany || '').trim();
+    const firstName = (req.body.newCustomerFirstName || '').trim();
+    const lastName = (req.body.newCustomerLastName || '').trim();
+    const email = (req.body.newCustomerEmail || '').trim().toLowerCase();
+    const phone = (req.body.newCustomerPhone || '').trim();
+
+    if (company && email) {
+      const existing = store.customers.find((c) => String(c.email || '').toLowerCase() === email);
+      if (existing) {
+        customerId = existing.id;
+      } else {
+        const id = nextId(store.customers);
+        store.customers.unshift({
+          id,
+          company,
+          vat: '',
+          firstName,
+          lastName,
+          email,
+          phone,
+          billingAddress: '',
+          pec: '',
+          sdi: '',
+          status: 'lead',
+          wpUserId: null,
+          wpUsername: '',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        });
+        customerId = id;
+      }
+    }
+  }
+
+  const title = (req.body.title || '').trim();
+  const status = normalizeJobStatus(req.body.status);
+  if (!title || !customerId) {
+    return res.redirect('/gestionale/lavori/new');
+  }
+
+  store.jobs.unshift({
+    id: nextId(store.jobs),
+    title,
+    customerId,
+    serviceId: Number(req.body.serviceId || 0) || null,
+    notes: (req.body.notes || '').trim(),
+    dueDate: (req.body.dueDate || '').trim(),
+    amount: Number(req.body.amount || 0),
+    status,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  });
+
+  writeStore(store);
+  res.redirect('/gestionale/lavori');
+});
+
+app.post('/gestionale/lavori/:id/status', (req, res) => {
+  const store = readStore();
+  const id = Number(req.params.id || 0);
+  const status = normalizeJobStatus(req.body.status);
+  const job = store.jobs.find((j) => Number(j.id) === id);
+  if (job) {
+    job.status = status;
+    job.updatedAt = new Date().toISOString();
+    writeStore(store);
+  }
+  res.redirect('/gestionale/lavori');
 });
 
 app.get('/gestionale/rinnovi', (req, res) => {
   const store = readStore();
-  const renewals = upcomingRenewals(store, 90);
+  const renewals = chronologicalRenewals(store);
   const body = `
-    <h1>Rinnovi in scadenza</h1>
+    <h1>Rinnovi</h1>
     <section class="card">
-      <h2>Prossimi 90 giorni</h2>
+      <h2>Rinnovi in ordine cronologico</h2>
       ${renderRenewalsTable(renewals, store.services)}
     </section>
   `;
@@ -521,8 +692,10 @@ app.post('/gestionale/ticket/:id/status', (req, res) => {
   const status = ['open', 'in_progress', 'closed'].includes(req.body.status) ? req.body.status : 'open';
   const store = readStore();
   const ticket = store.tickets.find((t) => t.id === id);
-  if (ticket) ticket.status = status;
-  writeStore(store);
+  if (ticket) {
+    ticket.status = status;
+    writeStore(store);
+  }
   res.redirect('/gestionale/ticket');
 });
 
@@ -582,7 +755,7 @@ function ensureStore() {
 }
 
 function emptyStore() {
-  return { services: [], customers: [], invites: [], subscriptions: [], tickets: [] };
+  return { services: [], customers: [], invites: [], subscriptions: [], tickets: [], jobs: [] };
 }
 
 function readStore() {
@@ -598,8 +771,8 @@ function normalizeStore(store) {
   if (!Array.isArray(s.invites)) s.invites = [];
   if (!Array.isArray(s.subscriptions)) s.subscriptions = [];
   if (!Array.isArray(s.tickets)) s.tickets = [];
+  if (!Array.isArray(s.jobs)) s.jobs = [];
 
-  // Backfill old subscriptions without customerId.
   for (const sub of s.subscriptions) {
     if (!sub.customerId) {
       let customer = s.customers.find((c) => String(c.email || '').toLowerCase() === String(sub.email || '').toLowerCase());
@@ -630,6 +803,10 @@ function normalizeStore(store) {
     if (typeof sub.priceAtSale === 'undefined') sub.priceAtSale = 0;
   }
 
+  for (const job of s.jobs) {
+    if (!job.status) job.status = 'aperta';
+  }
+
   return s;
 }
 
@@ -639,6 +816,12 @@ function writeStore(data) {
 
 function nextId(arr) {
   return arr.length ? Math.max(...arr.map((x) => Number(x.id) || 0)) + 1 : 1;
+}
+
+function chronologicalRenewals(store) {
+  return store.subscriptions
+    .filter((s) => s.renewalDate)
+    .sort((a, b) => String(a.renewalDate).localeCompare(String(b.renewalDate)));
 }
 
 function upcomingRenewals(store, days) {
@@ -671,6 +854,23 @@ function labelBilling(type, interval) {
   if (interval === 'monthly') return 'Abbonamento mensile';
   if (interval === 'semiannual') return 'Abbonamento semestrale';
   return 'Abbonamento annuale';
+}
+
+function labelJobStatus(v) {
+  const map = {
+    aperta: 'Aperta',
+    call_fissata: 'Call fissata',
+    preventivo_inviato: 'Preventivo inviato',
+    attiva: 'Attiva',
+    chiusa_acquisita: 'Chiusa e acquisita',
+    chiusa_persa: 'Chiusa e persa'
+  };
+  return map[v] || v;
+}
+
+function normalizeJobStatus(v) {
+  const value = String(v || 'aperta');
+  return JOB_STATUS_OPTIONS.includes(value) ? value : 'aperta';
 }
 
 function renderServiceForm(action) {
@@ -706,6 +906,20 @@ function createServiceFromRequest(store, body) {
   };
   store.services.unshift(service);
   return service;
+}
+
+function resolveServiceForAssignment(store, body) {
+  let serviceId = Number(body.serviceId || 0);
+  if (serviceId) return serviceId;
+
+  const created = createServiceFromRequest(store, {
+    name: body.newServiceName,
+    price: body.newServicePrice,
+    billingType: body.newServiceBillingType,
+    billingInterval: body.newServiceBillingInterval
+  });
+  if (!created) return 0;
+  return created.id;
 }
 
 function deriveBillingType(override, fallback) {
@@ -748,6 +962,30 @@ function makeUsername(email, displayName) {
   return base || `user.${Date.now()}`;
 }
 
+function maybeSendInviteEmail(customer, invite, inviteUrl) {
+  if (!(SMTP_HOST && SMTP_USER && SMTP_PASS && SMTP_FROM)) return;
+
+  const transporter = nodemailer.createTransport({
+    host: SMTP_HOST,
+    port: SMTP_PORT,
+    secure: SMTP_PORT === 465,
+    auth: { user: SMTP_USER, pass: SMTP_PASS },
+    connectionTimeout: 7000,
+    greetingTimeout: 7000,
+    socketTimeout: 10000
+  });
+
+  const subject = '[Easy Digital Agency] Completa la tua registrazione';
+  const text = `Ciao ${customer.firstName},\n\nPer completare la registrazione alla tua area personale usa questo link:\n${inviteUrl}\n\nIl link scade il ${invite.expiresAt.slice(0, 10)}.\n\nEasy Digital Agency`;
+
+  Promise.race([
+    transporter.sendMail({ from: SMTP_FROM, to: customer.email, subject, text }),
+    new Promise((_, reject) => setTimeout(() => reject(new Error('SMTP timeout')), 12000))
+  ]).catch((e) => {
+    console.error('Invite mail error:', e.message);
+  });
+}
+
 function renderServicesTable(services) {
   if (!services.length) return '<p>Nessun servizio in catalogo.</p>';
   const rows = services
@@ -762,40 +1000,35 @@ function renderCustomersTable(store) {
   const rows = store.customers.map((c) => {
     const invite = store.invites.find((i) => i.customerId === c.id && i.status === 'pending');
     const inviteLink = invite ? `${WP_BASE_URL}/areapersonale/invito?token=${invite.token}` : '';
-    const inviteCell = inviteLink
-      ? `<div><a href="${esc(inviteLink)}" target="_blank" rel="noopener">Apri link</a><br/><code>${esc(inviteLink)}</code></div>`
-      : '-';
-
     return `<tr>
-      <td>${esc(c.company || '-')}</td>
+      <td><a href="/gestionale/clienti/${c.id}">${esc(c.company || '-')}</a></td>
       <td>${esc(`${c.firstName} ${c.lastName}`.trim())}</td>
       <td>${esc(c.email)}</td>
       <td>${esc(c.phone || '-')}</td>
       <td>${esc(c.vat || '-')}</td>
       <td>${esc(c.status)}</td>
-      <td>${inviteCell}</td>
+      <td>${inviteLink ? `<code>${esc(inviteLink)}</code>` : '-'}</td>
     </tr>`;
   }).join('');
 
   return `<table class="tbl"><thead><tr><th>Azienda</th><th>Referente</th><th>Email</th><th>Telefono</th><th>P.IVA</th><th>Stato</th><th>Link invito</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
-function renderAdminSubscriptions(store) {
-  if (!store.subscriptions.length) return '<p>Nessuna assegnazione.</p>';
-  const rows = store.subscriptions.map((s) => {
-    const srv = store.services.find((x) => x.id === s.serviceId);
+function renderSubscriptionsTableForAdmin(subs, services) {
+  if (!subs.length) return '<p>Nessun servizio associato.</p>';
+  const rows = subs.map((s) => {
+    const srv = services.find((x) => x.id === s.serviceId);
     return `<tr>
-      <td>${esc(s.company || s.customerName)}</td>
-      <td>${esc(s.email)}</td>
       <td>${esc(srv ? srv.name : 'N/A')}</td>
       <td>${esc(labelBilling(s.billingType, s.billingInterval))}</td>
-      <td>${esc(s.purchaseDate)}</td>
+      <td>${esc(s.purchaseDate || '-')}</td>
       <td>${esc(s.renewalDate || '-')}</td>
-      <td>${esc(s.status)}</td>
+      <td>€ ${Number(s.priceAtSale || 0).toFixed(2)}</td>
+      <td>${esc(s.status || '-')}</td>
     </tr>`;
   }).join('');
 
-  return `<table class="tbl"><thead><tr><th>Cliente</th><th>Email</th><th>Servizio</th><th>Tipo</th><th>Attivazione</th><th>Rinnovo</th><th>Stato</th></tr></thead><tbody>${rows}</tbody></table>`;
+  return `<table class="tbl"><thead><tr><th>Servizio</th><th>Tipo</th><th>Attivazione</th><th>Rinnovo</th><th>Importo</th><th>Stato</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
 function renderSubscriptionsTable(subs) {
@@ -848,12 +1081,38 @@ function renderAdminTickets(tickets, customers) {
 }
 
 function renderRenewalsTable(rows, services) {
-  if (!rows.length) return '<p>Nessun rinnovo nei prossimi 90 giorni.</p>';
+  if (!rows.length) return '<p>Nessun rinnovo.</p>';
   const htmlRows = rows.map((r) => {
     const srv = services.find((s) => s.id === r.serviceId);
-    return `<tr><td>${esc(r.renewalDate)}</td><td>${esc(r.company || r.customerName)}</td><td>${esc(r.email)}</td><td>${esc(srv ? srv.name : 'N/A')}</td><td>${esc(labelBilling(r.billingType, r.billingInterval))}</td><td>${esc(r.status)}</td></tr>`;
+    return `<tr><td>${esc(r.renewalDate || '-')}</td><td>${esc(r.company || r.customerName)}</td><td>${esc(r.email)}</td><td>${esc(srv ? srv.name : 'N/A')}</td><td>${esc(labelBilling(r.billingType, r.billingInterval))}</td><td>${esc(r.status)}</td></tr>`;
   }).join('');
   return `<table class="tbl"><thead><tr><th>Rinnovo</th><th>Cliente</th><th>Email</th><th>Servizio</th><th>Tipo</th><th>Stato</th></tr></thead><tbody>${htmlRows}</tbody></table>`;
+}
+
+function renderJobsTable(jobs, customers, services, includeActions) {
+  if (!jobs.length) return '<p>Nessuna commessa.</p>';
+
+  const rows = jobs
+    .map((j) => {
+      const customer = customers.find((c) => Number(c.id) === Number(j.customerId || 0));
+      const service = services.find((s) => Number(s.id) === Number(j.serviceId || 0));
+      const actions = includeActions
+        ? `<form method="post" action="/gestionale/lavori/${j.id}/status" style="display:flex;gap:8px;align-items:center"><select name="status">${JOB_STATUS_OPTIONS.map((s) => `<option value="${s}" ${j.status === s ? 'selected' : ''}>${esc(labelJobStatus(s))}</option>`).join('')}</select><button type="submit">Aggiorna</button></form>`
+        : '-';
+      return `<tr>
+        <td>${esc(j.title)}</td>
+        <td>${esc(customer ? (customer.company || `${customer.firstName} ${customer.lastName}`) : 'N/A')}</td>
+        <td>${esc(service ? service.name : '-')}</td>
+        <td>${esc(j.dueDate || '-')}</td>
+        <td>€ ${Number(j.amount || 0).toFixed(2)}</td>
+        <td>${esc(labelJobStatus(j.status))}</td>
+        <td>${esc(j.notes || '-')}</td>
+        <td>${actions}</td>
+      </tr>`;
+    })
+    .join('');
+
+  return `<table class="tbl"><thead><tr><th>Commessa</th><th>Cliente</th><th>Servizio</th><th>Scadenza</th><th>Importo</th><th>Stato</th><th>Note</th><th>Azione</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
 async function sendRenewalReminders() {
@@ -937,8 +1196,9 @@ function renderAppLayout(title, body, user, isAdmin) {
   const adminLinks = isAdmin
     ? `
       <a href="/gestionale">Dashboard</a>
-      <a href="/gestionale/servizi">Servizi</a>
       <a href="/gestionale/clienti">Clienti</a>
+      <a href="/gestionale/lavori">Lavori</a>
+      <a href="/gestionale/servizi">Servizi</a>
       <a href="/gestionale/rinnovi">Rinnovi</a>
       <a href="/gestionale/ticket">Ticket</a>
     `
@@ -978,12 +1238,12 @@ function baseStyles() {
     :root { --g:#3dae63; --txt:#0f172a; --muted:#64748b; --line:#dbe5dd; --bg:#f3f6f4; }
     * { box-sizing:border-box; }
     body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial; color:var(--txt); background:var(--bg); }
-    .shell { max-width:1180px; margin:0 auto; padding:22px 16px 40px; }
+    .shell { max-width:1280px; margin:0 auto; padding:22px 16px 40px; }
     .top { display:flex; justify-content:space-between; gap:14px; align-items:flex-start; background:#fff; border:1px solid var(--line); border-radius:12px; padding:14px; margin-bottom:16px; }
     .muted { color:var(--muted); font-size:.88rem; margin-top:4px; }
     .nav { display:flex; gap:8px; flex-wrap:wrap; }
-    .nav a { text-decoration:none; border:1px solid var(--line); background:#fff; color:#111; padding:7px 10px; border-radius:8px; font-size:.9rem; }
-    .nav a:hover { border-color:var(--g); color:var(--g); }
+    .nav a, .btn-link { text-decoration:none; border:1px solid var(--line); background:#fff; color:#111; padding:7px 10px; border-radius:8px; font-size:.9rem; display:inline-block; }
+    .nav a:hover, .btn-link:hover { border-color:var(--g); color:var(--g); }
     h1 { margin:4px 0 12px; font-size:1.65rem; }
     h2 { margin:0 0 10px; font-size:1.2rem; }
     .card { background:#fff; border:1px solid var(--line); border-radius:12px; padding:14px; margin-bottom:14px; }
@@ -993,14 +1253,16 @@ function baseStyles() {
     .kpi-value { font-size:1.45rem; font-weight:700; color:#165f34; }
     .form-grid { display:grid; gap:10px; }
     .two-col { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .row-between { display:flex; justify-content:space-between; align-items:center; gap:12px; }
     input, select, textarea, button { font:inherit; }
     input, select, textarea { width:100%; padding:10px 11px; border:1px solid var(--line); border-radius:8px; background:#fff; }
     button { border:1px solid #2f9f57; background:#3dae63; color:#fff; border-radius:8px; padding:10px 12px; cursor:pointer; font-weight:600; }
     button:hover { background:#2f9f57; }
     .tbl { width:100%; border-collapse:collapse; }
     .tbl th, .tbl td { border-bottom:1px solid #ecf1ed; text-align:left; padding:8px; font-size:.93rem; vertical-align:top; }
-    .tbl th { color:#334155; background:#f8fbf9; }
+    .tbl th { color:#334155; background:#f8fbf9; position: sticky; top: 0; }
     code { word-break: break-all; font-size: .82rem; background:#f7faf8; padding: 2px 4px; border-radius:4px; }
-    @media (max-width:900px){ .top {flex-direction:column;} .two-col { grid-template-columns:1fr; } }
+    details summary { cursor:pointer; }
+    @media (max-width:900px){ .top {flex-direction:column;} .two-col { grid-template-columns:1fr; } .row-between { flex-direction:column; align-items:flex-start; } }
   </style>`;
 }
