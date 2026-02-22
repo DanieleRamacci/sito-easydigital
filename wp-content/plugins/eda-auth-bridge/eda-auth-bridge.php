@@ -42,12 +42,14 @@ final class EDA_Auth_Bridge {
             $next = '/areapersonale';
         }
 
-        if (!is_user_logged_in()) {
+        $user_id = self::resolve_logged_user_id();
+        if (!$user_id) {
             $redirect = home_url('/wp-json/eda-auth/v1/sso-start?next=' . rawurlencode($next));
             wp_safe_redirect(wp_login_url($redirect));
             exit;
         }
 
+        wp_set_current_user($user_id);
         $user = wp_get_current_user();
         if (!$user || !$user->ID) {
             return new WP_REST_Response(['message' => 'Utente non valido'], 401);
@@ -123,6 +125,20 @@ final class EDA_Auth_Bridge {
         }
         $opt = get_option('eda_sso_secret', '');
         return is_string($opt) ? $opt : '';
+    }
+
+    private static function resolve_logged_user_id() {
+        if (is_user_logged_in()) {
+            return get_current_user_id();
+        }
+
+        if (!defined('LOGGED_IN_COOKIE') || empty($_COOKIE[LOGGED_IN_COOKIE])) {
+            return 0;
+        }
+
+        $cookie = wp_unslash((string) $_COOKIE[LOGGED_IN_COOKIE]);
+        $uid = wp_validate_auth_cookie($cookie, 'logged_in');
+        return $uid ? (int) $uid : 0;
     }
 
     private static function jwt_encode(array $payload, string $secret) {
