@@ -320,10 +320,31 @@ SMTP_FROM=
 ### Deploy
 
 ```bash
-docker compose up -d --build manager-app wordpress
+docker compose pull
+docker compose up -d
 ```
 
 Se usi Portainer, aggiorna lo stack con il nuovo `docker-compose.yml`.
+
+### Portainer: cosa incollare nello Stack
+
+Usa il `docker-compose.yml` della repo aggiornato (include `db`, `redis`, `wordpress`, `manager-app`).
+
+Punti chiave:
+
+- `manager-app` usa immagine GHCR:
+  - `ghcr.io/${GHCR_OWNER}/${GHCR_IMAGE}-manager:latest`
+- WordPress usa:
+  - `ghcr.io/${GHCR_OWNER}/${GHCR_IMAGE}:latest` (oppure il valore fisso che preferisci)
+- In Portainer imposta anche le variabili env usate nello stack:
+  - `GHCR_OWNER`
+  - `GHCR_IMAGE`
+  - `WP_DOMAIN`
+  - `MYSQL_*`
+  - `WORDPRESS_TABLE_PREFIX`
+  - `REDIS_HOST`, `REDIS_PORT`
+  - `EDA_SSO_SECRET`
+  - `SMTP_*` (se vuoi reminder email reali)
 
 ### Flusso login
 

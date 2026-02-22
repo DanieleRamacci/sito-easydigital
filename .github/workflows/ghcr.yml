@@ -26,20 +26,38 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Docker metadata
-        id: meta
+      - name: Docker metadata (WordPress)
+        id: meta_wp
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ github.repository }}
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ github.event.repository.name }}
           tags: |
             type=raw,value=latest
             type=sha
 
-      - name: Build and push
+      - name: Build and push (WordPress)
         uses: docker/build-push-action@v6
         with:
           context: .
           file: Dockerfile
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ steps.meta_wp.outputs.tags }}
+          labels: ${{ steps.meta_wp.outputs.labels }}
+
+      - name: Docker metadata (Manager App)
+        id: meta_mgr
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ github.event.repository.name }}-manager
+          tags: |
+            type=raw,value=latest
+            type=sha
+
+      - name: Build and push (Manager App)
+        uses: docker/build-push-action@v6
+        with:
+          context: ./manager-app
+          file: manager-app/Dockerfile
+          push: true
+          tags: ${{ steps.meta_mgr.outputs.tags }}
+          labels: ${{ steps.meta_mgr.outputs.labels }}

@@ -13,11 +13,22 @@ services:
     networks:
       - wp_internal
 
+  redis:
+    image: redis:7-alpine
+    container_name: easydigital-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    networks:
+      - wp_internal
+
   wordpress:
-    image: ghcr.io/danieleramacci/sito-easydigital:latest
+    image: ghcr.io/${GHCR_OWNER}/${GHCR_IMAGE}:latest
     container_name: easydigital-wordpress
     depends_on:
       - db
+      - redis
     restart: unless-stopped
     pull_policy: always
     environment:
@@ -27,6 +38,9 @@ services:
       WORDPRESS_DB_PASSWORD: ${MYSQL_PASSWORD}
       WORDPRESS_TABLE_PREFIX: ${WORDPRESS_TABLE_PREFIX}
       WORDPRESS_CONFIG_EXTRA: |
+        define('WP_CACHE', true);
+        define('WP_REDIS_HOST', '${REDIS_HOST}');
+        define('WP_REDIS_PORT', (int) '${REDIS_PORT}');
         define('EDA_SSO_SECRET', '${EDA_SSO_SECRET}');
     volumes:
       - wp_data:/var/www/html
@@ -54,11 +68,10 @@ services:
       - gruppo_proxy
 
   manager-app:
-    build:
-      context: ./manager-app
-      dockerfile: Dockerfile
+    image: ghcr.io/${GHCR_OWNER}/${GHCR_IMAGE}-manager:latest
     container_name: easydigital-manager
     restart: unless-stopped
+    pull_policy: always
     environment:
       PORT: 3000
       WP_BASE_URL: https://${WP_DOMAIN}
@@ -91,4 +104,5 @@ networks:
 volumes:
   wp_data:
   wp_db_data:
+  redis_data:
   manager_data:
