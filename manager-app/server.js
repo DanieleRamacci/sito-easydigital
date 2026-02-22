@@ -413,19 +413,25 @@ app.post('/gestionale/clienti/new', async (req, res) => {
   const inviteUrl = `${WP_BASE_URL}/areapersonale/invito?token=${encodeURIComponent(inviteToken)}`;
 
   if (SMTP_HOST && SMTP_USER && SMTP_PASS && SMTP_FROM) {
-    try {
-      const transporter = nodemailer.createTransport({
-        host: SMTP_HOST,
-        port: SMTP_PORT,
-        secure: SMTP_PORT === 465,
-        auth: { user: SMTP_USER, pass: SMTP_PASS }
-      });
-      const subject = '[Easy Digital Agency] Completa la tua registrazione';
-      const text = `Ciao ${customer.firstName},\n\nPer completare la registrazione alla tua area personale usa questo link:\n${inviteUrl}\n\nIl link scade il ${invite.expiresAt.slice(0, 10)}.\n\nEasy Digital Agency`;
-      await transporter.sendMail({ from: SMTP_FROM, to: customer.email, subject, text });
-    } catch (e) {
+    const transporter = nodemailer.createTransport({
+      host: SMTP_HOST,
+      port: SMTP_PORT,
+      secure: SMTP_PORT === 465,
+      auth: { user: SMTP_USER, pass: SMTP_PASS },
+      connectionTimeout: 7000,
+      greetingTimeout: 7000,
+      socketTimeout: 10000
+    });
+    const subject = '[Easy Digital Agency] Completa la tua registrazione';
+    const text = `Ciao ${customer.firstName},\n\nPer completare la registrazione alla tua area personale usa questo link:\n${inviteUrl}\n\nIl link scade il ${invite.expiresAt.slice(0, 10)}.\n\nEasy Digital Agency`;
+
+    // Non bloccare la risposta HTTP: invio email in background con timeout breve.
+    Promise.race([
+      transporter.sendMail({ from: SMTP_FROM, to: customer.email, subject, text }),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('SMTP timeout')), 12000))
+    ]).catch((e) => {
       console.error('Invite mail error:', e.message);
-    }
+    });
   }
 
   writeStore(store);
