@@ -406,97 +406,165 @@ app.get('/gestionale/clienti/:id', (req, res) => {
 
   const invite = store.invites.find((i) => i.customerId === id && i.status === 'pending');
   const inviteLink = invite ? `${WP_BASE_URL}/areapersonale/invito?token=${invite.token}` : '';
+  const latestJob = [...customerJobs].sort((a, b) => String(b.updatedAt || b.createdAt || '').localeCompare(String(a.updatedAt || a.createdAt || '')))[0];
+  const pipelineStage = latestJob ? normalizeJobStatus(latestJob.status) : 'aperta';
+  const totalValue = customerSubs.reduce((sum, s) => sum + Number(s.priceAtSale || 0), 0);
+  const customerNotes = Array.isArray(customer.notes) ? [...customer.notes].sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || ''))) : [];
 
   const body = `
-    <h1>Cliente: ${esc(customer.company || `${customer.firstName} ${customer.lastName}`)}</h1>
-
-    <section class="card">
-      <h2>Dati cliente</h2>
-      <div class="two-col" style="display:grid;gap:10px;grid-template-columns:repeat(2,minmax(0,1fr));">
-        <p><strong>Azienda:</strong> ${esc(customer.company || '-')}</p>
-        <p><strong>Referente:</strong> ${esc(`${customer.firstName} ${customer.lastName}`.trim())}</p>
-        <p><strong>Email:</strong> ${esc(customer.email)}</p>
-        <p><strong>Telefono:</strong> ${esc(customer.phone || '-')}</p>
-        <p><strong>P.IVA:</strong> ${esc(customer.vat || '-')}</p>
-        <p><strong>Stato:</strong> ${esc(customer.status)}</p>
-        <p><strong>PEC:</strong> ${esc(customer.pec || '-')}</p>
-        <p><strong>SDI:</strong> ${esc(customer.sdi || '-')}</p>
+    <section class="crm-header card">
+      <div class="crm-title-wrap">
+        <a class="crm-back" href="/gestionale/clienti">← Clienti</a>
+        <h1>${esc(customer.company || `${customer.firstName} ${customer.lastName}`)} · € ${totalValue.toFixed(2)}</h1>
+        <div class="muted">Referente: ${esc(`${customer.firstName} ${customer.lastName}`.trim())}</div>
       </div>
-      ${inviteLink ? `<p><strong>Link invito attivo:</strong> <a href="${esc(inviteLink)}" target="_blank" rel="noopener">apri</a><br/><code>${esc(inviteLink)}</code></p>` : '<p>Nessun invito pendente.</p>'}
+      <div class="crm-actions">
+        <a class="btn-link" href="mailto:${esc(customer.email)}">Invia e-mail</a>
+        ${inviteLink ? `<a class="btn-link" href="${esc(inviteLink)}" target="_blank" rel="noopener">Link invito</a>` : ''}
+      </div>
     </section>
 
-    <section class="card">
-      <h2>Associa servizio</h2>
-      <form method="post" action="/gestionale/clienti/${id}/assign" class="form-grid two-col">
-        <select name="serviceId">
-          <option value="">Crea nuovo servizio al volo</option>
-          ${serviceOptions}
-        </select>
-        <input name="newServiceName" type="text" placeholder="Nuovo servizio: nome" />
-
-        <input name="newServicePrice" type="number" step="0.01" min="0" placeholder="Nuovo servizio: prezzo" />
-        <select name="newServiceBillingType">
-          <option value="one_time">Nuovo servizio: una tantum</option>
-          <option value="subscription">Nuovo servizio: abbonamento</option>
-        </select>
-
-        <select name="newServiceBillingInterval">
-          <option value="monthly">Nuovo servizio: mensile</option>
-          <option value="semiannual">Nuovo servizio: semestrale</option>
-          <option value="annual">Nuovo servizio: annuale</option>
-        </select>
-        <input type="date" name="purchaseDate" required />
-
-        <select name="billingTypeOverride">
-          <option value="auto">Tipo fatturazione: auto da servizio</option>
-          <option value="one_time">Una tantum</option>
-          <option value="subscription">Abbonamento</option>
-        </select>
-        <select name="billingIntervalOverride">
-          <option value="auto">Periodo rinnovo: auto da servizio</option>
-          <option value="monthly">Mensile</option>
-          <option value="semiannual">Semestrale</option>
-          <option value="annual">Annuale</option>
-        </select>
-
-        <select name="status">
-          <option value="active">Attivo</option>
-          <option value="expired">Scaduto</option>
-          <option value="cancelled">Annullato</option>
-        </select>
-        <textarea name="notes" rows="2" placeholder="Note servizio"></textarea>
-
-        <button type="submit">Associa servizio</button>
-      </form>
+    <section class="card crm-pipeline">
+      ${renderPipeline(pipelineStage)}
     </section>
 
-    <section class="card">
-      <h2>Servizi associati</h2>
-      ${renderSubscriptionsTableForAdmin(customerSubs, store.services)}
+    <section class="crm-layout">
+      <aside class="card crm-left">
+        <h2>Contatto correlato</h2>
+        <p><strong>${esc(`${customer.firstName} ${customer.lastName}`.trim())}</strong></p>
+        <p>${esc(customer.email)}</p>
+        <p>${esc(customer.phone || '-')}</p>
+        <h2>Societa correlata</h2>
+        <p><strong>${esc(customer.company || '-')}</strong></p>
+        <p>P.IVA: ${esc(customer.vat || '-')}</p>
+        <p>PEC: ${esc(customer.pec || '-')}</p>
+        <p>SDI: ${esc(customer.sdi || '-')}</p>
+        <p>Stato: <span class="status-badge">${esc(customer.status)}</span></p>
+      </aside>
+
+      <section class="card crm-right">
+        <div class="crm-tabs">
+          <button class="crm-tab-btn is-active" data-tab="sequenza">Sequenza temporale</button>
+          <button class="crm-tab-btn" data-tab="note">Note (${customerNotes.length})</button>
+          <button class="crm-tab-btn" data-tab="servizi">Servizi</button>
+          <button class="crm-tab-btn" data-tab="rinnovi">Rinnovi</button>
+          <button class="crm-tab-btn" data-tab="ticket">Ticket</button>
+          <button class="crm-tab-btn" data-tab="commesse">Commesse</button>
+        </div>
+
+        <div class="crm-tab-panel is-active" data-panel="sequenza">
+          ${renderJobsTimeline(customerJobs)}
+        </div>
+
+        <div class="crm-tab-panel" data-panel="note">
+          <form method="post" action="/gestionale/clienti/${id}/note" class="form-grid">
+            <textarea name="text" rows="3" placeholder="Di che cosa tratta la nota?" required></textarea>
+            <button type="submit">Salva nota</button>
+          </form>
+          ${renderCustomerNotes(customerNotes)}
+        </div>
+
+        <div class="crm-tab-panel" data-panel="servizi">
+          <section class="card">
+            <h2>Associa servizio</h2>
+            <form method="post" action="/gestionale/clienti/${id}/assign" class="form-grid two-col">
+              <select name="serviceId">
+                <option value="">Crea nuovo servizio al volo</option>
+                ${serviceOptions}
+              </select>
+              <input name="newServiceName" type="text" placeholder="Nuovo servizio: nome" />
+
+              <input name="newServicePrice" type="number" step="0.01" min="0" placeholder="Nuovo servizio: prezzo" />
+              <select name="newServiceBillingType">
+                <option value="one_time">Nuovo servizio: una tantum</option>
+                <option value="subscription">Nuovo servizio: abbonamento</option>
+              </select>
+
+              <select name="newServiceBillingInterval">
+                <option value="monthly">Nuovo servizio: mensile</option>
+                <option value="semiannual">Nuovo servizio: semestrale</option>
+                <option value="annual">Nuovo servizio: annuale</option>
+              </select>
+              <input type="date" name="purchaseDate" required />
+
+              <select name="billingTypeOverride">
+                <option value="auto">Tipo fatturazione: auto da servizio</option>
+                <option value="one_time">Una tantum</option>
+                <option value="subscription">Abbonamento</option>
+              </select>
+              <select name="billingIntervalOverride">
+                <option value="auto">Periodo rinnovo: auto da servizio</option>
+                <option value="monthly">Mensile</option>
+                <option value="semiannual">Semestrale</option>
+                <option value="annual">Annuale</option>
+              </select>
+
+              <select name="status">
+                <option value="active">Attivo</option>
+                <option value="expired">Scaduto</option>
+                <option value="cancelled">Annullato</option>
+              </select>
+              <textarea name="notes" rows="2" placeholder="Note servizio"></textarea>
+
+              <button type="submit">Associa servizio</button>
+            </form>
+          </section>
+          ${renderSubscriptionsTableForAdmin(customerSubs, store.services)}
+        </div>
+
+        <div class="crm-tab-panel" data-panel="rinnovi">
+          <h2>Prossimi rinnovi</h2>
+          ${renderRenewalsTable(upcoming, store.services)}
+          <h2 style="margin-top:16px">Storico rinnovi/pagamenti</h2>
+          ${renderRenewalsTable(history, store.services)}
+        </div>
+
+        <div class="crm-tab-panel" data-panel="ticket">
+          ${renderAdminTickets(customerTickets, [customer])}
+        </div>
+
+        <div class="crm-tab-panel" data-panel="commesse">
+          ${renderJobsTable(customerJobs, store.customers, store.services, true)}
+        </div>
+      </section>
     </section>
 
-    <section class="card">
-      <h2>Prossimi rinnovi</h2>
-      ${renderRenewalsTable(upcoming, store.services)}
-    </section>
-
-    <section class="card">
-      <h2>Storico rinnovi/pagamenti</h2>
-      ${renderRenewalsTable(history, store.services)}
-    </section>
-
-    <section class="card">
-      <h2>Ticket cliente</h2>
-      ${renderAdminTickets(customerTickets, [customer])}
-    </section>
-
-    <section class="card">
-      <h2>Lavori/commesse cliente</h2>
-      ${renderJobsTable(customerJobs, store.customers, store.services, true)}
-    </section>
+    <script>
+      (function () {
+        const btns = document.querySelectorAll('.crm-tab-btn');
+        const panels = document.querySelectorAll('.crm-tab-panel');
+        btns.forEach((btn) => {
+          btn.addEventListener('click', () => {
+            const tab = btn.getAttribute('data-tab');
+            btns.forEach((b) => b.classList.remove('is-active'));
+            panels.forEach((p) => p.classList.remove('is-active'));
+            btn.classList.add('is-active');
+            const panel = document.querySelector('.crm-tab-panel[data-panel=\"' + tab + '\"]');
+            if (panel) panel.classList.add('is-active');
+          });
+        });
+      })();
+    </script>
   `;
 
   res.send(renderAppLayout('Gestionale - Dettaglio Cliente', body, req.user, true));
+});
+
+app.post('/gestionale/clienti/:id/note', (req, res) => {
+  const store = readStore();
+  const customerId = Number(req.params.id || 0);
+  const text = (req.body.text || '').trim();
+  const customer = store.customers.find((c) => Number(c.id) === customerId);
+  if (!customer || !text) return res.redirect(`/gestionale/clienti/${customerId}`);
+  if (!Array.isArray(customer.notes)) customer.notes = [];
+  customer.notes.unshift({
+    id: Date.now(),
+    text,
+    createdAt: new Date().toISOString()
+  });
+  customer.updatedAt = new Date().toISOString();
+  writeStore(store);
+  res.redirect(`/gestionale/clienti/${customerId}`);
 });
 
 app.post('/gestionale/clienti/:id/assign', (req, res) => {
@@ -807,6 +875,10 @@ function normalizeStore(store) {
     if (!job.status) job.status = 'aperta';
   }
 
+  for (const customer of s.customers) {
+    if (!Array.isArray(customer.notes)) customer.notes = [];
+  }
+
   return s;
 }
 
@@ -1089,6 +1161,33 @@ function renderRenewalsTable(rows, services) {
   return `<table class="tbl"><thead><tr><th>Rinnovo</th><th>Cliente</th><th>Email</th><th>Servizio</th><th>Tipo</th><th>Stato</th></tr></thead><tbody>${htmlRows}</tbody></table>`;
 }
 
+function renderPipeline(currentStage) {
+  const items = JOB_STATUS_OPTIONS
+    .map((s, idx) => {
+      const active = s === currentStage ? 'is-current' : '';
+      return `<div class="crm-step ${active}"><span class="crm-step-dot">${idx + 1}</span><span>${esc(labelJobStatus(s))}</span></div>`;
+    })
+    .join('');
+  return `<div class="crm-steps">${items}</div>`;
+}
+
+function renderJobsTimeline(jobs) {
+  if (!jobs.length) return '<p>Nessuna attivita timeline disponibile.</p>';
+  const rows = [...jobs]
+    .sort((a, b) => String(b.updatedAt || b.createdAt || '').localeCompare(String(a.updatedAt || a.createdAt || '')))
+    .map((j) => `<li><strong>${esc(labelJobStatus(j.status))}</strong> · ${esc(j.title)} <span class="muted">(${esc((j.updatedAt || j.createdAt || '').slice(0, 10))})</span></li>`)
+    .join('');
+  return `<ul class="crm-timeline">${rows}</ul>`;
+}
+
+function renderCustomerNotes(notes) {
+  if (!notes.length) return '<p class="muted" style="margin-top:12px">Questo record non ha note.</p>';
+  const rows = notes
+    .map((n) => `<div class="crm-note"><div class="muted">${esc((n.createdAt || '').slice(0, 10))}</div><div>${esc(n.text)}</div></div>`)
+    .join('');
+  return `<div class="crm-notes-list">${rows}</div>`;
+}
+
 function renderJobsTable(jobs, customers, services, includeActions) {
   if (!jobs.length) return '<p>Nessuna commessa.</p>';
 
@@ -1263,6 +1362,27 @@ function baseStyles() {
     .tbl th { color:#334155; background:#f8fbf9; position: sticky; top: 0; }
     code { word-break: break-all; font-size: .82rem; background:#f7faf8; padding: 2px 4px; border-radius:4px; }
     details summary { cursor:pointer; }
-    @media (max-width:900px){ .top {flex-direction:column;} .two-col { grid-template-columns:1fr; } .row-between { flex-direction:column; align-items:flex-start; } }
+    .crm-header { display:flex; justify-content:space-between; align-items:flex-start; gap:14px; }
+    .crm-title-wrap h1 { margin:6px 0 6px; }
+    .crm-back { text-decoration:none; color:#0f172a; font-size:.9rem; }
+    .crm-actions { display:flex; gap:8px; flex-wrap:wrap; }
+    .crm-pipeline { overflow:auto; }
+    .crm-steps { display:flex; gap:12px; min-width:900px; align-items:center; }
+    .crm-step { display:flex; align-items:center; gap:8px; color:#64748b; }
+    .crm-step-dot { width:24px; height:24px; border-radius:999px; border:1px solid #94a3b8; display:inline-flex; align-items:center; justify-content:center; font-size:.78rem; background:#fff; }
+    .crm-step.is-current { color:#0f172a; font-weight:600; }
+    .crm-step.is-current .crm-step-dot { border-color:#3dae63; background:#e9f8ef; color:#166534; }
+    .crm-layout { display:grid; grid-template-columns: 320px 1fr; gap:14px; align-items:start; }
+    .crm-left h2 { margin-top:12px; }
+    .crm-tabs { display:flex; gap:6px; flex-wrap:wrap; border-bottom:1px solid var(--line); padding-bottom:8px; margin-bottom:12px; }
+    .crm-tab-btn { border:1px solid var(--line); background:#fff; color:#334155; border-radius:8px; padding:8px 10px; cursor:pointer; }
+    .crm-tab-btn.is-active { border-color:#3dae63; color:#166534; background:#e9f8ef; }
+    .crm-tab-panel { display:none; }
+    .crm-tab-panel.is-active { display:block; }
+    .crm-timeline { margin:0; padding-left:18px; display:grid; gap:8px; }
+    .crm-notes-list { margin-top:12px; display:grid; gap:8px; }
+    .crm-note { border:1px solid var(--line); border-radius:8px; padding:10px; background:#f8fbf9; }
+    .status-badge { border:1px solid #bbf7d0; color:#166534; background:#e9f8ef; border-radius:999px; padding:3px 8px; font-size:.82rem; }
+    @media (max-width:900px){ .top {flex-direction:column;} .two-col { grid-template-columns:1fr; } .row-between { flex-direction:column; align-items:flex-start; } .crm-layout { grid-template-columns:1fr; } .crm-steps { min-width:unset; flex-direction:column; align-items:flex-start; } }
   </style>`;
 }
