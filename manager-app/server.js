@@ -5,6 +5,7 @@ const path = require('path');
 const jwt = require('jsonwebtoken');
 const cron = require('node-cron');
 const nodemailer = require('nodemailer');
+const crypto = require('crypto');
 
 const app = express();
 app.use(express.urlencoded({ extended: true }));
@@ -43,7 +44,7 @@ app.get(['/gestionale/auth/callback', '/areapersonale/auth/callback'], (req, res
       maxAge: 60 * 60 * 1000
     });
     return res.redirect(next);
-  } catch (e) {
+  } catch (_e) {
     return res.status(401).send('Token non valido');
   }
 });
@@ -53,35 +54,97 @@ app.get('/logout', (req, res) => {
   res.redirect('/areapersonale');
 });
 
-app.get('/areapersonale/registrazione', (req, res) => {
-  res.send(renderPublicPage('Registrazione', renderRegistrationForm(req.query.msg || '')));
+app.get('/areapersonale/invito', (req, res) => {
+  const token = (req.query.token || '').trim();
+  const store = readStore();
+  const invite = store.invites.find((i) => i.token === token && i.status === 'pending');
+  if (!invite) {
+    return res.send(renderPublicPage('Invito non valido', '<p>Il link non e valido o e gia stato usato.</p>'));
+  }
+
+  if (invite.expiresAt && new Date(invite.expiresAt) < new Date()) {
+    return res.send(renderPublicPage('Invito scaduto', '<p>Il link e scaduto. Chiedi un nuovo invito.</p>'));
+  }
+
+  const customer = store.customers.find((c) => c.id === invite.customerId);
+  if (!customer) {
+    return res.send(renderPublicPage('Errore', '<p>Cliente non trovato.</p>'));
+  }
+
+  res.send(renderPublicPage('Completa registrazione', renderInviteCompletionForm(customer, token, req.query.msg || '')));
 });
 
-app.post('/areapersonale/registrazione', async (req, res) => {
-  const username = (req.body.username || '').trim();
-  const email = (req.body.email || '').trim();
-  const displayName = (req.body.display_name || '').trim();
+app.post('/areapersonale/invito', async (req, res) => {
+  const token = (req.body.token || '').trim();
   const password = (req.body.password || '').trim();
+
+  const store = readStore();
+  const invite = store.invites.find((i) => i.token === token && i.status === 'pending');
+  if (!invite) {
+    return res.send(renderPublicPage('Invito non valido', '<p>Il link non e valido o e gia stato usato.</p>'));
+  }
+
+  if (invite.expiresAt && new Date(invite.expiresAt) < new Date()) {
+    invite.status = 'expired';
+    writeStore(store);
+    return res.send(renderPublicPage('Invito scaduto', '<p>Il link e scaduto. Chiedi un nuovo invito.</p>'));
+  }
+
+  const customer = store.customers.find((c) => c.id === invite.customerId);
+  if (!customer) {
+    return res.send(renderPublicPage('Errore', '<p>Cliente non trovato.</p>'));
+  }
+
+  const company = (req.body.company || '').trim();
+  const vat = (req.body.vat || '').trim();
+  const phone = (req.body.phone || '').trim();
+  const billingAddress = (req.body.billingAddress || '').trim();
+  const pec = (req.body.pec || '').trim();
+  const sdi = (req.body.sdi || '').trim();
+
+  if (!password) {
+    return res.send(renderPublicPage('Completa registrazione', renderInviteCompletionForm(customer, token, 'Password obbligatoria')));
+  }
 
   if (!WP_BASE_URL) {
     return res.status(500).send('WP_BASE_URL non configurato');
   }
 
+  const displayName = `${customer.firstName} ${customer.lastName}`.trim();
+  const username = makeUsername(customer.email, displayName);
+
   try {
     const resp = await fetch(`${WP_BASE_URL}/wp-json/eda-auth/v1/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, email, display_name: displayName, password })
+      body: JSON.stringify({ username, email: customer.email, display_name: displayName, password })
     });
 
     const data = await resp.json();
     if (!resp.ok) {
-      return res.send(renderPublicPage('Registrazione', renderRegistrationForm(data.message || 'Errore registrazione')));
+      return res.send(renderPublicPage('Completa registrazione', renderInviteCompletionForm(customer, token, data.message || 'Errore registrazione')));
     }
 
-    return res.redirect('/areapersonale/registrazione?msg=' + encodeURIComponent('Registrazione completata. Ora effettua il login WordPress.'));
-  } catch (err) {
-    return res.send(renderPublicPage('Registrazione', renderRegistrationForm('Errore di connessione a WordPress.')));
+    customer.company = company || customer.company;
+    customer.vat = vat || customer.vat;
+    customer.phone = phone || customer.phone;
+    customer.billingAddress = billingAddress || customer.billingAddress;
+    customer.pec = pec || customer.pec;
+    customer.sdi = sdi || customer.sdi;
+    customer.wpUserId = Number(data.user_id || 0) || null;
+    customer.wpUsername = username;
+    customer.status = 'active';
+    customer.completedAt = new Date().toISOString();
+    customer.updatedAt = new Date().toISOString();
+
+    invite.status = 'completed';
+    invite.completedAt = new Date().toISOString();
+
+    writeStore(store);
+
+    return res.redirect('/areapersonale/invito?token=' + encodeURIComponent(token) + '&msg=' + encodeURIComponent('Registrazione completata. Ora puoi accedere con Login WordPress.'));
+  } catch (_err) {
+    return res.send(renderPublicPage('Completa registrazione', renderInviteCompletionForm(customer, token, 'Errore di connessione a WordPress')));
   }
 });
 
@@ -89,20 +152,31 @@ app.use(['/gestionale', '/areapersonale'], authMiddleware);
 
 app.get('/areapersonale', (req, res) => {
   const store = readStore();
-  const userId = req.user.sub;
-  const email = req.user.email;
+  const userId = Number(req.user.sub || 0);
+  const userEmail = String(req.user.email || '').toLowerCase();
 
-  const mySubs = store.subscriptions.filter((s) => Number(s.wpUserId) === Number(userId));
-  const myTickets = store.tickets.filter((t) => Number(t.wpUserId) === Number(userId));
+  const myCustomer = store.customers.find((c) => Number(c.wpUserId || 0) === userId || String(c.email || '').toLowerCase() === userEmail) || null;
+  const myCustomerId = myCustomer ? Number(myCustomer.id) : 0;
+
+  const mySubs = store.subscriptions.filter((s) => Number(s.customerId || 0) === myCustomerId || Number(s.wpUserId || 0) === userId);
+  const myTickets = store.tickets.filter((t) => Number(t.customerId || 0) === myCustomerId || Number(t.wpUserId || 0) === userId);
 
   const enrichedSubs = mySubs.map((s) => {
     const srv = store.services.find((x) => x.id === s.serviceId);
-    return { ...s, serviceName: srv ? srv.name : `Servizio #${s.serviceId}`, billingType: srv ? srv.billingType : 'one_time', price: srv ? srv.price : 0 };
+    return {
+      ...s,
+      serviceName: srv ? srv.name : `Servizio #${s.serviceId}`,
+      price: Number(s.priceAtSale || srv?.price || 0),
+      billingType: s.billingType || srv?.billingType || 'one_time',
+      billingInterval: s.billingInterval || srv?.billingInterval || '-'
+    };
   });
 
   const body = `
     <h1>Area Personale</h1>
-    <p>Ciao <strong>${esc(req.user.display_name || req.user.email)}</strong>. Qui trovi i tuoi servizi, i rinnovi e i ticket.</p>
+    <p>Ciao <strong>${esc(req.user.display_name || req.user.email)}</strong>. Qui trovi i tuoi servizi, rinnovi e ticket.</p>
+
+    ${myCustomer ? renderCustomerSnapshot(myCustomer) : '<section class="card"><p>La tua anagrafica cliente non e ancora collegata. Contattaci per assistenza.</p></section>'}
 
     <section class="card">
       <h2>Servizi attivi / storico</h2>
@@ -135,9 +209,14 @@ app.post('/areapersonale/ticket/new', (req, res) => {
   }
 
   const store = readStore();
+  const userId = Number(req.user.sub || 0);
+  const userEmail = String(req.user.email || '').toLowerCase();
+  const customer = store.customers.find((c) => Number(c.wpUserId || 0) === userId || String(c.email || '').toLowerCase() === userEmail) || null;
+
   store.tickets.unshift({
     id: nextId(store.tickets),
-    wpUserId: Number(req.user.sub),
+    customerId: customer ? Number(customer.id) : null,
+    wpUserId: userId || null,
     email: req.user.email,
     subject,
     message,
@@ -157,10 +236,11 @@ app.get('/gestionale', (req, res) => {
   const body = `
     <h1>Gestionale - Dashboard</h1>
     <div class="kpi-grid">
+      ${kpi('Clienti', String(store.customers.length))}
       ${kpi('Servizi catalogo', String(store.services.length))}
-      ${kpi('Abbonamenti/assegnazioni', String(store.subscriptions.length))}
+      ${kpi('Servizi attivi', String(store.subscriptions.filter((s) => s.status === 'active').length))}
       ${kpi('Rinnovi entro 90gg', String(renew90.length))}
-      ${kpi('Ticket aperti', String(store.tickets.filter(t => t.status !== 'closed').length))}
+      ${kpi('Ticket aperti', String(store.tickets.filter((t) => t.status !== 'closed').length))}
     </div>
   `;
   res.send(renderAppLayout('Gestionale', body, req.user, true));
@@ -172,13 +252,7 @@ app.get('/gestionale/servizi', (req, res) => {
     <h1>Gestione Servizi</h1>
     <section class="card">
       <h2>Nuovo servizio</h2>
-      <form method="post" action="/gestionale/servizi/new" class="form-grid">
-        <input name="name" type="text" placeholder="Nome servizio" required />
-        <textarea name="description" rows="3" placeholder="Descrizione"></textarea>
-        <input name="price" type="number" step="0.01" min="0" placeholder="Prezzo" required />
-        <select name="billingType"><option value="one_time">Una tantum</option><option value="annual">Rinnovo annuale</option></select>
-        <button type="submit">Salva servizio</button>
-      </form>
+      ${renderServiceForm('/gestionale/servizi/new')}
     </section>
     <section class="card">
       <h2>Catalogo servizi</h2>
@@ -189,67 +263,224 @@ app.get('/gestionale/servizi', (req, res) => {
 });
 
 app.post('/gestionale/servizi/new', (req, res) => {
-  const name = (req.body.name || '').trim();
-  if (!name) return res.redirect('/gestionale/servizi');
   const store = readStore();
-  store.services.unshift({
-    id: nextId(store.services),
-    name,
-    description: (req.body.description || '').trim(),
-    price: Number(req.body.price || 0),
-    billingType: req.body.billingType === 'annual' ? 'annual' : 'one_time',
-    active: true,
-    createdAt: new Date().toISOString()
-  });
+  const created = createServiceFromRequest(store, req.body);
+  if (!created) return res.redirect('/gestionale/servizi');
   writeStore(store);
   res.redirect('/gestionale/servizi');
 });
 
 app.get('/gestionale/clienti', (req, res) => {
   const store = readStore();
-  const serviceOptions = store.services.map((s) => `<option value="${s.id}">${esc(s.name)} (${s.billingType === 'annual' ? 'annuale' : 'una tantum'})</option>`).join('');
+  const serviceOptions = store.services
+    .map((s) => `<option value="${s.id}">${esc(s.name)} (${labelBilling(s.billingType, s.billingInterval)})</option>`)
+    .join('');
+  const customerOptions = store.customers
+    .map((c) => `<option value="${c.id}">${esc(c.company || `${c.firstName} ${c.lastName}`)} - ${esc(c.email)}</option>`)
+    .join('');
 
   const body = `
-    <h1>Clienti e assegnazioni</h1>
+    <h1>Clienti</h1>
+
     <section class="card">
-      <h2>Assegna servizio cliente</h2>
-      <form method="post" action="/gestionale/clienti/assign" class="form-grid">
-        <input type="number" name="wpUserId" min="1" placeholder="ID utente WordPress" required />
-        <input type="text" name="customerName" placeholder="Nome cliente" required />
-        <input type="email" name="email" placeholder="Email cliente" required />
-        <select name="serviceId" required><option value="">Seleziona servizio</option>${serviceOptions}</select>
-        <input type="date" name="purchaseDate" required />
-        <input type="date" name="renewalDate" />
-        <select name="status"><option value="active">Attivo</option><option value="expired">Scaduto</option><option value="cancelled">Annullato</option></select>
-        <textarea name="notes" rows="2" placeholder="Note"></textarea>
-        <button type="submit">Assegna</button>
+      <h2>Nuovo cliente (invio invito)</h2>
+      <form method="post" action="/gestionale/clienti/new" class="form-grid two-col">
+        <input type="text" name="company" placeholder="Azienda" required />
+        <input type="text" name="vat" placeholder="Partita IVA" />
+        <input type="text" name="firstName" placeholder="Nome referente" required />
+        <input type="text" name="lastName" placeholder="Cognome referente" required />
+        <input type="email" name="email" placeholder="Email" required />
+        <input type="text" name="phone" placeholder="Telefono" required />
+        <input type="text" name="billingAddress" placeholder="Indirizzo di fatturazione" />
+        <input type="text" name="pec" placeholder="PEC" />
+        <input type="text" name="sdi" placeholder="Codice SDI" />
+        <button type="submit">Crea cliente e genera link invito</button>
       </form>
     </section>
+
     <section class="card">
-      <h2>Lista clienti/servizi</h2>
+      <h2>Assegna servizio al cliente</h2>
+      <form method="post" action="/gestionale/clienti/assign" class="form-grid two-col">
+        <select name="customerId" required>
+          <option value="">Seleziona cliente</option>
+          ${customerOptions}
+        </select>
+        <select name="serviceId">
+          <option value="">Crea nuovo servizio al volo</option>
+          ${serviceOptions}
+        </select>
+
+        <input name="newServiceName" type="text" placeholder="Nuovo servizio: nome (se non selezioni dal catalogo)" />
+        <input name="newServicePrice" type="number" step="0.01" min="0" placeholder="Nuovo servizio: prezzo" />
+
+        <select name="newServiceBillingType">
+          <option value="one_time">Nuovo servizio: una tantum</option>
+          <option value="subscription">Nuovo servizio: abbonamento</option>
+        </select>
+        <select name="newServiceBillingInterval">
+          <option value="monthly">Nuovo servizio: mensile</option>
+          <option value="semiannual">Nuovo servizio: semestrale</option>
+          <option value="annual">Nuovo servizio: annuale</option>
+        </select>
+
+        <input type="date" name="purchaseDate" required />
+        <select name="billingTypeOverride">
+          <option value="auto">Tipo fatturazione: auto da servizio</option>
+          <option value="one_time">Una tantum</option>
+          <option value="subscription">Abbonamento</option>
+        </select>
+
+        <select name="billingIntervalOverride">
+          <option value="auto">Periodo rinnovo: auto da servizio</option>
+          <option value="monthly">Mensile</option>
+          <option value="semiannual">Semestrale</option>
+          <option value="annual">Annuale</option>
+        </select>
+        <select name="status">
+          <option value="active">Attivo</option>
+          <option value="expired">Scaduto</option>
+          <option value="cancelled">Annullato</option>
+        </select>
+
+        <textarea name="notes" rows="2" placeholder="Note servizio"></textarea>
+        <button type="submit">Assegna servizio</button>
+      </form>
+    </section>
+
+    <section class="card">
+      <h2>Anagrafiche clienti</h2>
+      ${renderCustomersTable(store)}
+    </section>
+
+    <section class="card">
+      <h2>Lista clienti / servizi</h2>
       ${renderAdminSubscriptions(store)}
     </section>
   `;
+
   res.send(renderAppLayout('Gestionale - Clienti', body, req.user, true));
+});
+
+app.post('/gestionale/clienti/new', async (req, res) => {
+  const company = (req.body.company || '').trim();
+  const firstName = (req.body.firstName || '').trim();
+  const lastName = (req.body.lastName || '').trim();
+  const email = (req.body.email || '').trim().toLowerCase();
+  const phone = (req.body.phone || '').trim();
+
+  if (!company || !firstName || !lastName || !email || !phone) {
+    return res.redirect('/gestionale/clienti');
+  }
+
+  const store = readStore();
+  const existing = store.customers.find((c) => String(c.email || '').toLowerCase() === email);
+  if (existing) {
+    return res.redirect('/gestionale/clienti');
+  }
+
+  const customerId = nextId(store.customers);
+  const customer = {
+    id: customerId,
+    company,
+    vat: (req.body.vat || '').trim(),
+    firstName,
+    lastName,
+    email,
+    phone,
+    billingAddress: (req.body.billingAddress || '').trim(),
+    pec: (req.body.pec || '').trim(),
+    sdi: (req.body.sdi || '').trim(),
+    status: 'invited',
+    wpUserId: null,
+    wpUsername: '',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+  store.customers.unshift(customer);
+
+  const inviteToken = randomToken();
+  const invite = {
+    id: nextId(store.invites),
+    customerId,
+    token: inviteToken,
+    status: 'pending',
+    createdAt: new Date().toISOString(),
+    expiresAt: addDaysIso(14),
+    completedAt: ''
+  };
+  store.invites.unshift(invite);
+
+  const inviteUrl = `${WP_BASE_URL}/areapersonale/invito?token=${encodeURIComponent(inviteToken)}`;
+
+  if (SMTP_HOST && SMTP_USER && SMTP_PASS && SMTP_FROM) {
+    try {
+      const transporter = nodemailer.createTransport({
+        host: SMTP_HOST,
+        port: SMTP_PORT,
+        secure: SMTP_PORT === 465,
+        auth: { user: SMTP_USER, pass: SMTP_PASS }
+      });
+      const subject = '[Easy Digital Agency] Completa la tua registrazione';
+      const text = `Ciao ${customer.firstName},\n\nPer completare la registrazione alla tua area personale usa questo link:\n${inviteUrl}\n\nIl link scade il ${invite.expiresAt.slice(0, 10)}.\n\nEasy Digital Agency`;
+      await transporter.sendMail({ from: SMTP_FROM, to: customer.email, subject, text });
+    } catch (e) {
+      console.error('Invite mail error:', e.message);
+    }
+  }
+
+  writeStore(store);
+  return res.redirect('/gestionale/clienti');
 });
 
 app.post('/gestionale/clienti/assign', (req, res) => {
   const store = readStore();
-  const wpUserId = Number(req.body.wpUserId || 0);
-  const serviceId = Number(req.body.serviceId || 0);
-  if (!wpUserId || !serviceId) return res.redirect('/gestionale/clienti');
+  const customerId = Number(req.body.customerId || 0);
+  if (!customerId) return res.redirect('/gestionale/clienti');
+
+  const customer = store.customers.find((c) => Number(c.id) === customerId);
+  if (!customer) return res.redirect('/gestionale/clienti');
+
+  let serviceId = Number(req.body.serviceId || 0);
+
+  if (!serviceId) {
+    const created = createServiceFromRequest(store, {
+      name: req.body.newServiceName,
+      price: req.body.newServicePrice,
+      billingType: req.body.newServiceBillingType,
+      billingInterval: req.body.newServiceBillingInterval
+    });
+    if (!created) return res.redirect('/gestionale/clienti');
+    serviceId = created.id;
+  }
+
+  const service = store.services.find((s) => Number(s.id) === serviceId);
+  if (!service) return res.redirect('/gestionale/clienti');
+
+  const purchaseDate = (req.body.purchaseDate || '').trim();
+  if (!purchaseDate) return res.redirect('/gestionale/clienti');
+
+  const billingType = deriveBillingType(req.body.billingTypeOverride, service.billingType);
+  const billingInterval = deriveBillingInterval(req.body.billingIntervalOverride, service.billingInterval);
+  const renewalDate = billingType === 'subscription' ? computeRenewalDate(purchaseDate, billingInterval) : '';
+
   store.subscriptions.unshift({
     id: nextId(store.subscriptions),
-    wpUserId,
-    customerName: (req.body.customerName || '').trim(),
-    email: (req.body.email || '').trim(),
+    customerId: customer.id,
+    wpUserId: customer.wpUserId || null,
+    customerName: `${customer.firstName} ${customer.lastName}`.trim(),
+    company: customer.company,
+    email: customer.email,
     serviceId,
-    purchaseDate: req.body.purchaseDate || '',
-    renewalDate: req.body.renewalDate || '',
+    purchaseDate,
+    renewalDate,
+    billingType,
+    billingInterval,
+    priceAtSale: Number(service.price || 0),
     status: req.body.status || 'active',
     notes: (req.body.notes || '').trim(),
     lastReminderSent: ''
   });
+
   writeStore(store);
   res.redirect('/gestionale/clienti');
 });
@@ -273,7 +504,7 @@ app.get('/gestionale/ticket', (req, res) => {
     <h1>Ticket</h1>
     <section class="card">
       <h2>Lista ticket</h2>
-      ${renderAdminTickets(store.tickets)}
+      ${renderAdminTickets(store.tickets, store.customers)}
     </section>
   `;
   res.send(renderAppLayout('Gestionale - Ticket', body, req.user, true));
@@ -293,7 +524,7 @@ cron.schedule('0 9 * * *', async () => {
   await sendRenewalReminders();
 });
 
-app.get('/', (req, res) => res.redirect('/areapersonale'));
+app.get('/', (_req, res) => res.redirect('/areapersonale'));
 
 app.listen(PORT, () => {
   console.log(`EDA manager app listening on :${PORT}`);
@@ -307,7 +538,7 @@ function authMiddleware(req, res, next) {
   try {
     req.user = jwt.verify(token, EDA_SSO_SECRET);
     return next();
-  } catch (e) {
+  } catch (_e) {
     res.clearCookie(SESSION_COOKIE, { path: '/' });
     return redirectToWpLogin(req, res);
   }
@@ -340,13 +571,60 @@ function sanitizeNext(next) {
 function ensureStore() {
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
   if (!fs.existsSync(STORE_FILE)) {
-    fs.writeFileSync(STORE_FILE, JSON.stringify({ services: [], subscriptions: [], tickets: [] }, null, 2), 'utf8');
+    fs.writeFileSync(STORE_FILE, JSON.stringify(emptyStore(), null, 2), 'utf8');
   }
+}
+
+function emptyStore() {
+  return { services: [], customers: [], invites: [], subscriptions: [], tickets: [] };
 }
 
 function readStore() {
   ensureStore();
-  return JSON.parse(fs.readFileSync(STORE_FILE, 'utf8'));
+  const raw = JSON.parse(fs.readFileSync(STORE_FILE, 'utf8'));
+  return normalizeStore(raw);
+}
+
+function normalizeStore(store) {
+  const s = store || {};
+  if (!Array.isArray(s.services)) s.services = [];
+  if (!Array.isArray(s.customers)) s.customers = [];
+  if (!Array.isArray(s.invites)) s.invites = [];
+  if (!Array.isArray(s.subscriptions)) s.subscriptions = [];
+  if (!Array.isArray(s.tickets)) s.tickets = [];
+
+  // Backfill old subscriptions without customerId.
+  for (const sub of s.subscriptions) {
+    if (!sub.customerId) {
+      let customer = s.customers.find((c) => String(c.email || '').toLowerCase() === String(sub.email || '').toLowerCase());
+      if (!customer && sub.email) {
+        customer = {
+          id: nextId(s.customers),
+          company: sub.company || '',
+          vat: '',
+          firstName: sub.customerName || '',
+          lastName: '',
+          email: sub.email,
+          phone: '',
+          billingAddress: '',
+          pec: '',
+          sdi: '',
+          status: sub.wpUserId ? 'active' : 'invited',
+          wpUserId: sub.wpUserId || null,
+          wpUsername: '',
+          createdAt: sub.createdAt || new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        };
+        s.customers.push(customer);
+      }
+      if (customer) sub.customerId = customer.id;
+    }
+    if (!sub.billingType) sub.billingType = sub.renewalDate ? 'subscription' : 'one_time';
+    if (!sub.billingInterval) sub.billingInterval = 'annual';
+    if (typeof sub.priceAtSale === 'undefined') sub.priceAtSale = 0;
+  }
+
+  return s;
 }
 
 function writeStore(data) {
@@ -360,11 +638,13 @@ function nextId(arr) {
 function upcomingRenewals(store, days) {
   const now = new Date();
   const max = new Date(now.getTime() + days * 86400000);
-  return store.subscriptions.filter((s) => {
-    if (!s.renewalDate || s.status !== 'active') return false;
-    const d = new Date(s.renewalDate + 'T00:00:00');
-    return d >= new Date(now.toDateString()) && d <= max;
-  }).sort((a, b) => String(a.renewalDate).localeCompare(String(b.renewalDate)));
+  return store.subscriptions
+    .filter((s) => {
+      if (!s.renewalDate || s.status !== 'active' || s.billingType !== 'subscription') return false;
+      const d = new Date(`${s.renewalDate}T00:00:00`);
+      return d >= new Date(now.toDateString()) && d <= max;
+    })
+    .sort((a, b) => String(a.renewalDate).localeCompare(String(b.renewalDate)));
 }
 
 function esc(v) {
@@ -380,25 +660,155 @@ function kpi(label, value) {
   return `<div class="kpi"><div class="kpi-label">${esc(label)}</div><div class="kpi-value">${esc(value)}</div></div>`;
 }
 
+function labelBilling(type, interval) {
+  if (type !== 'subscription') return 'Una tantum';
+  if (interval === 'monthly') return 'Abbonamento mensile';
+  if (interval === 'semiannual') return 'Abbonamento semestrale';
+  return 'Abbonamento annuale';
+}
+
+function renderServiceForm(action) {
+  return `<form method="post" action="${esc(action)}" class="form-grid two-col">
+    <input name="name" type="text" placeholder="Nome servizio" required />
+    <textarea name="description" rows="3" placeholder="Descrizione"></textarea>
+    <input name="price" type="number" step="0.01" min="0" placeholder="Prezzo" required />
+    <select name="billingType">
+      <option value="one_time">Una tantum</option>
+      <option value="subscription">Abbonamento</option>
+    </select>
+    <select name="billingInterval">
+      <option value="monthly">Mensile</option>
+      <option value="semiannual">Semestrale</option>
+      <option value="annual">Annuale</option>
+    </select>
+    <button type="submit">Salva servizio</button>
+  </form>`;
+}
+
+function createServiceFromRequest(store, body) {
+  const name = (body.name || '').trim();
+  if (!name) return null;
+  const service = {
+    id: nextId(store.services),
+    name,
+    description: (body.description || '').trim(),
+    price: Number(body.price || 0),
+    billingType: body.billingType === 'subscription' ? 'subscription' : 'one_time',
+    billingInterval: normalizeInterval(body.billingInterval || 'annual'),
+    active: true,
+    createdAt: new Date().toISOString()
+  };
+  store.services.unshift(service);
+  return service;
+}
+
+function deriveBillingType(override, fallback) {
+  if (override === 'one_time' || override === 'subscription') return override;
+  return fallback === 'subscription' ? 'subscription' : 'one_time';
+}
+
+function deriveBillingInterval(override, fallback) {
+  if (override === 'monthly' || override === 'semiannual' || override === 'annual') return override;
+  return normalizeInterval(fallback);
+}
+
+function normalizeInterval(v) {
+  if (v === 'monthly' || v === 'semiannual' || v === 'annual') return v;
+  return 'annual';
+}
+
+function computeRenewalDate(startDate, interval) {
+  const d = new Date(`${startDate}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return '';
+  const months = interval === 'monthly' ? 1 : interval === 'semiannual' ? 6 : 12;
+  d.setMonth(d.getMonth() + months);
+  return d.toISOString().slice(0, 10);
+}
+
+function randomToken() {
+  return crypto.randomBytes(24).toString('hex');
+}
+
+function addDaysIso(days) {
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  return d.toISOString();
+}
+
+function makeUsername(email, displayName) {
+  const fromEmail = String(email || '').split('@')[0].toLowerCase().replace(/[^a-z0-9._-]+/g, '.');
+  const fromName = String(displayName || '').toLowerCase().replace(/[^a-z0-9._-]+/g, '.');
+  const base = (fromEmail || fromName || `user.${Date.now()}`).replace(/^\.+|\.+$/g, '').slice(0, 32);
+  return base || `user.${Date.now()}`;
+}
+
 function renderServicesTable(services) {
   if (!services.length) return '<p>Nessun servizio in catalogo.</p>';
-  const rows = services.map((s) => `<tr><td>${s.id}</td><td>${esc(s.name)}</td><td>€ ${Number(s.price || 0).toFixed(2)}</td><td>${s.billingType === 'annual' ? 'Annuale' : 'Una tantum'}</td></tr>`).join('');
+  const rows = services
+    .map((s) => `<tr><td>${s.id}</td><td>${esc(s.name)}</td><td>€ ${Number(s.price || 0).toFixed(2)}</td><td>${esc(labelBilling(s.billingType, s.billingInterval))}</td></tr>`)
+    .join('');
   return `<table class="tbl"><thead><tr><th>ID</th><th>Servizio</th><th>Prezzo</th><th>Tipo</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+function renderCustomersTable(store) {
+  if (!store.customers.length) return '<p>Nessun cliente.</p>';
+
+  const rows = store.customers.map((c) => {
+    const invite = store.invites.find((i) => i.customerId === c.id && i.status === 'pending');
+    const inviteLink = invite ? `${WP_BASE_URL}/areapersonale/invito?token=${invite.token}` : '';
+    const inviteCell = inviteLink
+      ? `<div><a href="${esc(inviteLink)}" target="_blank" rel="noopener">Apri link</a><br/><code>${esc(inviteLink)}</code></div>`
+      : '-';
+
+    return `<tr>
+      <td>${esc(c.company || '-')}</td>
+      <td>${esc(`${c.firstName} ${c.lastName}`.trim())}</td>
+      <td>${esc(c.email)}</td>
+      <td>${esc(c.phone || '-')}</td>
+      <td>${esc(c.vat || '-')}</td>
+      <td>${esc(c.status)}</td>
+      <td>${inviteCell}</td>
+    </tr>`;
+  }).join('');
+
+  return `<table class="tbl"><thead><tr><th>Azienda</th><th>Referente</th><th>Email</th><th>Telefono</th><th>P.IVA</th><th>Stato</th><th>Link invito</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
 function renderAdminSubscriptions(store) {
   if (!store.subscriptions.length) return '<p>Nessuna assegnazione.</p>';
   const rows = store.subscriptions.map((s) => {
     const srv = store.services.find((x) => x.id === s.serviceId);
-    return `<tr><td>${esc(s.customerName)}</td><td>${esc(s.email)}</td><td>${esc(srv ? srv.name : 'N/A')}</td><td>${esc(s.purchaseDate)}</td><td>${esc(s.renewalDate || '-')}</td><td>${esc(s.status)}</td></tr>`;
+    return `<tr>
+      <td>${esc(s.company || s.customerName)}</td>
+      <td>${esc(s.email)}</td>
+      <td>${esc(srv ? srv.name : 'N/A')}</td>
+      <td>${esc(labelBilling(s.billingType, s.billingInterval))}</td>
+      <td>${esc(s.purchaseDate)}</td>
+      <td>${esc(s.renewalDate || '-')}</td>
+      <td>${esc(s.status)}</td>
+    </tr>`;
   }).join('');
-  return `<table class="tbl"><thead><tr><th>Cliente</th><th>Email</th><th>Servizio</th><th>Acquisto</th><th>Rinnovo</th><th>Stato</th></tr></thead><tbody>${rows}</tbody></table>`;
+
+  return `<table class="tbl"><thead><tr><th>Cliente</th><th>Email</th><th>Servizio</th><th>Tipo</th><th>Attivazione</th><th>Rinnovo</th><th>Stato</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
 function renderSubscriptionsTable(subs) {
   if (!subs.length) return '<p>Non risultano servizi associati al tuo account.</p>';
-  const rows = subs.map((s) => `<tr><td>${esc(s.serviceName)}</td><td>${s.billingType === 'annual' ? 'Annuale' : 'Una tantum'}</td><td>€ ${Number(s.price || 0).toFixed(2)}</td><td>${esc(s.purchaseDate)}</td><td>${esc(s.renewalDate || '-')}</td><td>${esc(s.status)}</td></tr>`).join('');
-  return `<table class="tbl"><thead><tr><th>Servizio</th><th>Tipo</th><th>Prezzo</th><th>Acquisto</th><th>Rinnovo</th><th>Stato</th></tr></thead><tbody>${rows}</tbody></table>`;
+  const rows = subs
+    .map((s) => `<tr><td>${esc(s.serviceName)}</td><td>${esc(labelBilling(s.billingType, s.billingInterval))}</td><td>€ ${Number(s.price || 0).toFixed(2)}</td><td>${esc(s.purchaseDate)}</td><td>${esc(s.renewalDate || '-')}</td><td>${esc(s.status)}</td></tr>`)
+    .join('');
+  return `<table class="tbl"><thead><tr><th>Servizio</th><th>Tipo</th><th>Prezzo</th><th>Attivazione</th><th>Rinnovo</th><th>Stato</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+function renderCustomerSnapshot(customer) {
+  return `<section class="card">
+    <h2>Dati anagrafici</h2>
+    <p><strong>Azienda:</strong> ${esc(customer.company || '-')}</p>
+    <p><strong>Referente:</strong> ${esc(`${customer.firstName} ${customer.lastName}`.trim())}</p>
+    <p><strong>Email:</strong> ${esc(customer.email)}</p>
+    <p><strong>Telefono:</strong> ${esc(customer.phone || '-')}</p>
+    <p><strong>P.IVA:</strong> ${esc(customer.vat || '-')}</p>
+  </section>`;
 }
 
 function renderTicketsTable(tickets) {
@@ -407,11 +817,14 @@ function renderTicketsTable(tickets) {
   return `<table class="tbl"><thead><tr><th>Oggetto</th><th>Stato</th><th>Data</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
-function renderAdminTickets(tickets) {
+function renderAdminTickets(tickets, customers) {
   if (!tickets.length) return '<p>Nessun ticket.</p>';
-  const rows = tickets.map((t) => `
+  const rows = tickets.map((t) => {
+    const customer = customers.find((c) => Number(c.id) === Number(t.customerId || 0));
+    const customerLabel = customer ? `${customer.company || ''} (${customer.email})` : t.email;
+    return `
     <tr>
-      <td>${t.id}</td><td>${esc(t.email)}</td><td>${esc(t.subject)}</td><td>${esc(t.status)}</td>
+      <td>${t.id}</td><td>${esc(customerLabel)}</td><td>${esc(t.subject)}</td><td>${esc(t.status)}</td>
       <td>
         <form method="post" action="/gestionale/ticket/${t.id}/status" style="display:flex;gap:8px;align-items:center">
           <select name="status">
@@ -423,17 +836,18 @@ function renderAdminTickets(tickets) {
         </form>
       </td>
     </tr>
-  `).join('');
-  return `<table class="tbl"><thead><tr><th>ID</th><th>Email</th><th>Oggetto</th><th>Stato</th><th>Azione</th></tr></thead><tbody>${rows}</tbody></table>`;
+  `;
+  }).join('');
+  return `<table class="tbl"><thead><tr><th>ID</th><th>Cliente</th><th>Oggetto</th><th>Stato</th><th>Azione</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
 function renderRenewalsTable(rows, services) {
   if (!rows.length) return '<p>Nessun rinnovo nei prossimi 90 giorni.</p>';
   const htmlRows = rows.map((r) => {
     const srv = services.find((s) => s.id === r.serviceId);
-    return `<tr><td>${esc(r.renewalDate)}</td><td>${esc(r.customerName)}</td><td>${esc(r.email)}</td><td>${esc(srv ? srv.name : 'N/A')}</td><td>${esc(r.status)}</td></tr>`;
+    return `<tr><td>${esc(r.renewalDate)}</td><td>${esc(r.company || r.customerName)}</td><td>${esc(r.email)}</td><td>${esc(srv ? srv.name : 'N/A')}</td><td>${esc(labelBilling(r.billingType, r.billingInterval))}</td><td>${esc(r.status)}</td></tr>`;
   }).join('');
-  return `<table class="tbl"><thead><tr><th>Rinnovo</th><th>Cliente</th><th>Email</th><th>Servizio</th><th>Stato</th></tr></thead><tbody>${htmlRows}</tbody></table>`;
+  return `<table class="tbl"><thead><tr><th>Rinnovo</th><th>Cliente</th><th>Email</th><th>Servizio</th><th>Tipo</th><th>Stato</th></tr></thead><tbody>${htmlRows}</tbody></table>`;
 }
 
 async function sendRenewalReminders() {
@@ -478,20 +892,32 @@ async function sendRenewalReminders() {
   if (changed) writeStore(store);
 }
 
-function renderRegistrationForm(msg) {
+function renderInviteCompletionForm(customer, token, msg) {
   const notice = msg ? `<p style="color:#15803d;font-weight:600">${esc(msg)}</p>` : '';
   return `
-    <h1>Registrazione Area Personale</h1>
-    <p>Registrati per accedere alla tua area personale e visualizzare servizi, rinnovi e ticket.</p>
+    <h1>Completa registrazione</h1>
+    <p>Completa i dati mancanti e imposta la password per attivare la tua area personale.</p>
     ${notice}
-    <form method="post" action="/areapersonale/registrazione" class="form-grid">
-      <input type="text" name="username" placeholder="Username" required />
-      <input type="email" name="email" placeholder="Email" required />
-      <input type="text" name="display_name" placeholder="Nome e Cognome" required />
+    <form method="post" action="/areapersonale/invito" class="form-grid two-col">
+      <input type="hidden" name="token" value="${esc(token)}" />
+      <input type="text" value="${esc(customer.company || '')}" disabled />
+      <input type="text" name="company" placeholder="Azienda" value="${esc(customer.company || '')}" />
+
+      <input type="text" value="${esc(`${customer.firstName} ${customer.lastName}`.trim())}" disabled />
+      <input type="email" value="${esc(customer.email || '')}" disabled />
+
+      <input type="text" name="phone" placeholder="Telefono" value="${esc(customer.phone || '')}" />
+      <input type="text" name="vat" placeholder="Partita IVA" value="${esc(customer.vat || '')}" />
+
+      <input type="text" name="billingAddress" placeholder="Indirizzo di fatturazione" value="${esc(customer.billingAddress || '')}" />
+      <input type="text" name="pec" placeholder="PEC" value="${esc(customer.pec || '')}" />
+
+      <input type="text" name="sdi" placeholder="Codice SDI" value="${esc(customer.sdi || '')}" />
       <input type="password" name="password" placeholder="Password" required />
-      <button type="submit">Crea account</button>
+
+      <button type="submit">Completa registrazione</button>
     </form>
-    <p>Hai gia un account? <a href="${WP_BASE_URL}/wp-login.php">Accedi con WordPress</a></p>
+    <p>Dopo il completamento, accedi da <a href="${WP_BASE_URL}/wp-login.php">Login WordPress</a>.</p>
   `;
 }
 
@@ -514,7 +940,6 @@ function renderAppLayout(title, body, user, isAdmin) {
 
   const userLinks = `
     <a href="/areapersonale">Area personale</a>
-    ${isAdmin ? '<a href="/areapersonale/registrazione">Nuova registrazione</a>' : ''}
     <a href="/logout">Logout</a>
   `;
 
@@ -561,6 +986,7 @@ function baseStyles() {
     .kpi-label { color:var(--muted); font-size:.85rem; }
     .kpi-value { font-size:1.45rem; font-weight:700; color:#165f34; }
     .form-grid { display:grid; gap:10px; }
+    .two-col { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     input, select, textarea, button { font:inherit; }
     input, select, textarea { width:100%; padding:10px 11px; border:1px solid var(--line); border-radius:8px; background:#fff; }
     button { border:1px solid #2f9f57; background:#3dae63; color:#fff; border-radius:8px; padding:10px 12px; cursor:pointer; font-weight:600; }
@@ -568,6 +994,7 @@ function baseStyles() {
     .tbl { width:100%; border-collapse:collapse; }
     .tbl th, .tbl td { border-bottom:1px solid #ecf1ed; text-align:left; padding:8px; font-size:.93rem; vertical-align:top; }
     .tbl th { color:#334155; background:#f8fbf9; }
-    @media (max-width:900px){ .top {flex-direction:column;} }
+    code { word-break: break-all; font-size: .82rem; background:#f7faf8; padding: 2px 4px; border-radius:4px; }
+    @media (max-width:900px){ .top {flex-direction:column;} .two-col { grid-template-columns:1fr; } }
   </style>`;
 }
