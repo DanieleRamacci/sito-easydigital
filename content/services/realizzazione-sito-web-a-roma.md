@@ -1,5 +1,7 @@
-slug: realizzazione-sito-web-a-roma-new
-title: Realizzazione Sito Web a Roma
+slug: realizzazione-siti-web-professionali-roma
+category: Servizi web agency : Design & Development
+sort_order: 1
+title: Realizzazione Siti Web Professionali a Roma
 card_title: Siti Web su Misura
 excerpt: Realizziamo siti web professionali a Roma con WordPress, Next.js, Strapi e LMS, progettati per performance, SEO e conversione.
 service_class: eda-realizzazione-sito-web
@@ -12,7 +14,13 @@ context_title: Perche investire nella realizzazione sito web a Roma
 context_intro: Un sito web non e solo presenza online: e un asset di business. Se struttura, performance e contenuti non sono progettati correttamente rischi di perdere traffico, contatti e opportunita commerciali ogni giorno.
 seo_title: Realizzazione Sito Web a Roma | Easy Digital Agency
 seo_description: Servizio di realizzazione sito web a Roma con WordPress, Next.js, Strapi e LMS. Siti veloci, SEO-friendly e orientati alla conversione.
+focus_keyword: realizzazione sito web a roma
+canonical_url: https://staging.easydigitalagency.it/servizi-digital-agency-test/realizzazione-siti-web-professionali-roma/
+ai_entities: Realizzazione siti web, WordPress, Next.js, Strapi, LMS, SEO tecnica, Easy Digital Agency, Roma
 ai_prompt: Spiegami in italiano, in modo semplice e sintetico, il servizio di realizzazione sito web a Roma di Easy Digital Agency. Includi differenze tra WordPress, Next.js, Strapi e LMS, quando scegliere ciascuna soluzione, vantaggi SEO e tempi medi di sviluppo.
+related_service_slugs:
+related_article_slugs: quanto-costa-farsi-realizzare-un-sito-web
+inline_links_html: <p>Approfondisci anche la guida: <a href="/quanto-costa-farsi-realizzare-un-sito-web/">Quanto costa farsi realizzare un sito web?</a></p>
 status: publish
 
 <section>

@@ -1,0 +1,238 @@
+<div class="eda-blog-hub">
+  <style>
+    /* Hide theme breadcrumb/title wrappers only on this page render */
+    .breadcrumb-area,
+    .breadcrumbs,
+    .breadcrumb,
+    .page-breadcrumb,
+    .entry-header,
+    .page-header,
+    .page-title-wrap,
+    .single-page-title,
+    .banner-inner__content,
+    .banner-inner__list,
+    .banner-inner__content h2,
+    .banner-inner .banner-inner__content,
+    .banner-inner .banner-inner__list {
+      display: none !important;
+    }
+    .eda-blog-hub {
+      max-width: 1260px;
+      margin: 0 auto;
+      padding: 30px 18px 60px;
+      color: #0f172a;
+    }
+    .eda-blog-hero {
+      border-radius: 18px;
+      padding: 30px 24px;
+      border: 1px solid #d7e2da;
+      background:
+        radial-gradient(900px 280px at 10% 0%, rgba(61, 174, 99, 0.20), transparent 62%),
+        linear-gradient(145deg, #edf8f0 0%, #f8fafc 45%, #f2f6fb 100%);
+    }
+    .eda-blog-hero h1 {
+      margin: 0 0 10px;
+      font-size: 2.1rem;
+      line-height: 1.2;
+    }
+    .eda-blog-hero p {
+      margin: 0;
+      color: #334155;
+      line-height: 1.65;
+      max-width: 900px;
+      font-size: 1.03rem;
+    }
+    .eda-meta {
+      margin-top: 12px;
+      color: #64748b;
+      font-size: 0.9rem;
+    }
+    .eda-layout {
+      margin-top: 24px;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 320px;
+      gap: 22px;
+      align-items: start;
+    }
+    .eda-main section + section {
+      margin-top: 28px;
+    }
+    .eda-main h2 {
+      margin: 0 0 12px;
+      font-size: 1.45rem;
+      line-height: 1.2;
+    }
+    .eda-grid {
+      display: grid;
+      gap: 14px;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .eda-card {
+      border: 1px solid #d5e1d8;
+      border-radius: 14px;
+      background: #fff;
+      padding: 15px;
+      box-shadow: 0 10px 24px rgba(15, 23, 42, 0.04);
+      display: flex;
+      flex-direction: column;
+      min-height: 210px;
+    }
+    .eda-card .eda-cat {
+      font-size: 0.74rem;
+      font-weight: 700;
+      color: #166534;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 8px;
+    }
+    .eda-card h3 {
+      margin: 0 0 8px;
+      font-size: 1.15rem;
+      line-height: 1.3;
+    }
+    .eda-card h3 a {
+      color: #0f172a;
+      text-decoration: none;
+    }
+    .eda-card p {
+      margin: 0;
+      color: #334155;
+      line-height: 1.58;
+      flex: 1;
+    }
+    .eda-foot {
+      margin-top: 14px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      color: #64748b;
+      font-size: 0.84rem;
+    }
+    .eda-link {
+      color: #166534;
+      text-decoration: none;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .eda-empty {
+      border: 1px dashed #cbd5e1;
+      border-radius: 12px;
+      padding: 16px;
+      color: #64748b;
+      background: #fff;
+    }
+    .eda-side {
+      position: sticky;
+      top: 18px;
+      display: grid;
+      gap: 14px;
+    }
+    .eda-help {
+      border-left: 5px solid #3dae63;
+      background-color: #ecf7f0;
+      border-radius: 8px;
+      padding: 18px 16px;
+      border: 1px solid #cfe8d7;
+    }
+    .eda-help .eda-help-top {
+      font-weight: 700;
+      color: #2f9f57;
+      margin-bottom: 10px;
+      font-size: 13px;
+      text-transform: uppercase;
+    }
+    .eda-help h3 {
+      margin: 0 0 8px;
+      font-size: 1.45rem;
+      line-height: 1.25;
+    }
+    .eda-help p {
+      margin: 0 0 8px;
+      line-height: 1.6;
+      color: #1f2937;
+      font-size: 0.98rem;
+    }
+    .eda-help a {
+      color: #2f9f57;
+      font-weight: 700;
+      text-decoration: underline;
+    }
+    .eda-cat-box {
+      border: 1px solid #d5e1d8;
+      border-radius: 12px;
+      background: #fff;
+      padding: 12px;
+    }
+    .eda-cat-box h3 {
+      margin: 0 0 8px;
+      font-size: 1.08rem;
+    }
+    .eda-cat-list {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      display: grid;
+      gap: 6px;
+    }
+    .eda-cat-list a {
+      display: block;
+      border-radius: 8px;
+      padding: 8px 10px;
+      text-decoration: none;
+      color: #1f2937;
+      border: 1px solid transparent;
+      background: #f8fafc;
+      font-size: 0.93rem;
+    }
+    @media (max-width: 1080px) {
+      .eda-layout { grid-template-columns: 1fr; }
+      .eda-side { position: static; }
+    }
+    @media (max-width: 760px) {
+      .eda-grid { grid-template-columns: 1fr; }
+      .eda-blog-hero h1 { font-size: 1.75rem; }
+      .eda-blog-hub { padding: 20px 14px 50px; }
+    }
+  </style>
+
+  <section class="eda-blog-hero">
+    <h1>Articoli e Guide Digitali</h1>
+    <p>Approfondimenti pratici su SEO, WordPress, performance e crescita online.</p>
+    <div class="eda-meta">Articoli pubblicati: 16 • Aggiornato: 2026-02-22 11:40 UTC</div>
+  </section>
+
+  <div class="eda-layout">
+    <main class="eda-main">
+      <section>
+        <h2>Articoli in evidenza</h2>
+        <div class="eda-grid"><article class="eda-card"><div class="eda-cat">Web Agency Roma</div><h3><a href="https://staging.easydigitalagency.it/quanto-costa-farsi-realizzare-un-sito-web/">Quanto costa farsi realizzare un sito web?</a></h3><p>Guida pratica ai costi reali di un sito web professionale: fasce di prezzo, differenze tra tema pronto e custom, tempi e budget da prevedere.</p><div class="eda-foot"><span>21/02/2026</span><a class="eda-link" href="https://staging.easydigitalagency.it/quanto-costa-farsi-realizzare-un-sito-web/">Leggi articolo →</a></div></article><article class="eda-card"><div class="eda-cat">Web Agency Roma</div><h3><a href="https://staging.easydigitalagency.it/sicurezza-wordpress-2026/">Sicurezza WordPress 2026: guida completa per proteggere il tuo sito e non perdere clienti</a></h3><p>Sicurezza WordPress 2026: guida completa per proteggere il tuo sito e non perdere clienti La sicurezza WordPress 2026 non è più un optional: se il&amp;hellip;</p><div class="eda-foot"><span>08/12/2025</span><a class="eda-link" href="https://staging.easydigitalagency.it/sicurezza-wordpress-2026/">Leggi articolo →</a></div></article><article class="eda-card"><div class="eda-cat">guide web</div><h3><a href="https://staging.easydigitalagency.it/come-creare-contenuti-video-per-i-social-faidate/">Come creare contenuti video per i social in modo professionale fai da te</a></h3><p>Realizzare video di qualità per i social non richiede sempre un set cinematografico: con un po’ di organizzazione,l’attrezzatura giusta e una strategia ben definita, puoi&amp;hellip;</p><div class="eda-foot"><span>13/08/2025</span><a class="eda-link" href="https://staging.easydigitalagency.it/come-creare-contenuti-video-per-i-social-faidate/">Leggi articolo →</a></div></article></div>
+      </section>
+      <section>
+        <h2>Ultimi articoli</h2>
+        <div class="eda-grid"><article class="eda-card"><div class="eda-cat">Web Agency Roma</div><h3><a href="https://staging.easydigitalagency.it/quanto-costa-farsi-realizzare-un-sito-web/">Quanto costa farsi realizzare un sito web?</a></h3><p>Guida pratica ai costi reali di un sito web professionale: fasce di prezzo, differenze tra tema pronto e custom, tempi e budget da prevedere.</p><div class="eda-foot"><span>21/02/2026</span><a class="eda-link" href="https://staging.easydigitalagency.it/quanto-costa-farsi-realizzare-un-sito-web/">Leggi articolo →</a></div></article><article class="eda-card"><div class="eda-cat">Web Agency Roma</div><h3><a href="https://staging.easydigitalagency.it/sicurezza-wordpress-2026/">Sicurezza WordPress 2026: guida completa per proteggere il tuo sito e non perdere clienti</a></h3><p>Sicurezza WordPress 2026: guida completa per proteggere il tuo sito e non perdere clienti La sicurezza WordPress 2026 non è più un optional: se il&amp;hellip;</p><div class="eda-foot"><span>08/12/2025</span><a class="eda-link" href="https://staging.easydigitalagency.it/sicurezza-wordpress-2026/">Leggi articolo →</a></div></article><article class="eda-card"><div class="eda-cat">guide web</div><h3><a href="https://staging.easydigitalagency.it/come-creare-contenuti-video-per-i-social-faidate/">Come creare contenuti video per i social in modo professionale fai da te</a></h3><p>Realizzare video di qualità per i social non richiede sempre un set cinematografico: con un po’ di organizzazione,l’attrezzatura giusta e una strategia ben definita, puoi&amp;hellip;</p><div class="eda-foot"><span>13/08/2025</span><a class="eda-link" href="https://staging.easydigitalagency.it/come-creare-contenuti-video-per-i-social-faidate/">Leggi articolo →</a></div></article><article class="eda-card"><div class="eda-cat">creare sito web passo passo</div><h3><a href="https://staging.easydigitalagency.it/come-fare-seo-da-soli-su-wordpress-con-ai/">Come fare SEO da soli su WordPress con AI</a></h3><p>Come fare SEO da soli su WordPress con AI non significa solo inserire qualche parola chiave in una pagina. La SEO è una strategia continua,&amp;hellip;</p><div class="eda-foot"><span>07/08/2025</span><a class="eda-link" href="https://staging.easydigitalagency.it/come-fare-seo-da-soli-su-wordpress-con-ai/">Leggi articolo →</a></div></article><article class="eda-card"><div class="eda-cat">aeo</div><h3><a href="https://staging.easydigitalagency.it/seo-geo-aeo-guida-alla-visibilita-online-2025/">SEO vs GEO vs AEO: guida ad una  visibilità online  forte 2025</a></h3><p>La visibilità online nel 2025 passa per queste tre domande e tecniche di ottimizzaizone : Cos&amp;#8217;è la SEO? È l’insieme di strategie per posizionare un&amp;hellip;</p><div class="eda-foot"><span>07/08/2025</span><a class="eda-link" href="https://staging.easydigitalagency.it/seo-geo-aeo-guida-alla-visibilita-online-2025/">Leggi articolo →</a></div></article><article class="eda-card"><div class="eda-cat">creare sito web passo passo</div><h3><a href="https://staging.easydigitalagency.it/come-implementare-facilmente-il-markup-localbusiness-in-json-ld-su-wordpress/">Come implementare facilmente il markup LocalBusiness in JSON-LD su WordPress</a></h3><p>Come migliorare la tua Local SEO con lo schema markup LocalBusiness in JSON-LD Se hai un&amp;#8217;attività locale e vuoi essere trovato su Google e Google&amp;hellip;</p><div class="eda-foot"><span>02/08/2025</span><a class="eda-link" href="https://staging.easydigitalagency.it/come-implementare-facilmente-il-markup-localbusiness-in-json-ld-su-wordpress/">Leggi articolo →</a></div></article></div>
+      </section>
+      <section>
+        <h2>Archivio per categoria</h2>
+        <section id="cat-aeo"><h2>aeo</h2><div class="eda-grid"><article class="eda-card"><div class="eda-cat">aeo</div><h3><a href="https://staging.easydigitalagency.it/seo-geo-aeo-guida-alla-visibilita-online-2025/">SEO vs GEO vs AEO: guida ad una  visibilità online  forte 2025</a></h3><p>La visibilità online nel 2025 passa per queste tre domande e tecniche di ottimizzaizone : Cos&amp;#8217;è la SEO? È l’insieme di strategie per posizionare un&amp;hellip;</p><div class="eda-foot"><span>07/08/2025</span><a class="eda-link" href="https://staging.easydigitalagency.it/seo-geo-aeo-guida-alla-visibilita-online-2025/">Leggi articolo →</a></div></article></div></section><section id="cat-avvocato"><h2>Avvocato</h2><div class="eda-grid"><article class="eda-card"><div class="eda-cat">Avvocato</div><h3><a href="https://staging.easydigitalagency.it/sito-web-studio-legale-presenza-social-avvocato/">Sito web studio legale presenza social avvocato</a></h3><p>Sito web studio legale presenza social avvocato Realizzare un sito web per studio legale, curare la presenza sui sociale valorizzare la propria attività di avvocato&amp;hellip;</p><div class="eda-foot"><span>18/03/2025</span><a class="eda-link" href="https://staging.easydigitalagency.it/sito-web-studio-legale-presenza-social-avvocato/">Leggi articolo →</a></div></article></div></section><section id="cat-creare-sito-web-passo-passo"><h2>creare sito web passo passo</h2><div class="eda-grid"><article class="eda-card"><div class="eda-cat">creare sito web passo passo</div><h3><a href="https://staging.easydigitalagency.it/come-fare-seo-da-soli-su-wordpress-con-ai/">Come fare SEO da soli su WordPress con AI</a></h3><p>Come fare SEO da soli su WordPress con AI non significa solo inserire qualche parola chiave in una pagina. La SEO è una strategia continua,&amp;hellip;</p><div class="eda-foot"><span>07/08/2025</span><a class="eda-link" href="https://staging.easydigitalagency.it/come-fare-seo-da-soli-su-wordpress-con-ai/">Leggi articolo →</a></div></article><article class="eda-card"><div class="eda-cat">creare sito web passo passo</div><h3><a href="https://staging.easydigitalagency.it/come-implementare-facilmente-il-markup-localbusiness-in-json-ld-su-wordpress/">Come implementare facilmente il markup LocalBusiness in JSON-LD su WordPress</a></h3><p>Come migliorare la tua Local SEO con lo schema markup LocalBusiness in JSON-LD Se hai un&amp;#8217;attività locale e vuoi essere trovato su Google e Google&amp;hellip;</p><div class="eda-foot"><span>02/08/2025</span><a class="eda-link" href="https://staging.easydigitalagency.it/come-implementare-facilmente-il-markup-localbusiness-in-json-ld-su-wordpress/">Leggi articolo →</a></div></article><article class="eda-card"><div class="eda-cat">creare sito web passo passo</div><h3><a href="https://staging.easydigitalagency.it/come-acquistare-un-dominio/">Come acquistare un dominio e hosting</a></h3><p>Come acquistare un dominio per il tuo sito web Se vuoi creare un sito web, il primo passo è acquistare un nome di dominio. È&amp;hellip;</p><div class="eda-foot"><span>25/03/2025</span><a class="eda-link" href="https://staging.easydigitalagency.it/come-acquistare-un-dominio/">Leggi articolo →</a></div></article><article class="eda-card"><div class="eda-cat">creare sito web passo passo</div><h3><a href="https://staging.easydigitalagency.it/come-scegliere-il-nome-di-un-sito-web-guida-completa/">Come scegliere il nome di un sito web: la migliore guida per il naming e il branding</a></h3><p>Come scegliere il nome di un sito web: guida completa per il naming e il branding Cos’è il nome di un sito web? Perché è&amp;hellip;</p><div class="eda-foot"><span>25/03/2025</span><a class="eda-link" href="https://staging.easydigitalagency.it/come-scegliere-il-nome-di-un-sito-web-guida-completa/">Leggi articolo →</a></div></article></div></section><section id="cat-gdpr-privacy-policy-cookie-law"><h2>GDPR Privacy Policy Cookie Law</h2><div class="eda-grid"><article class="eda-card"><div class="eda-cat">GDPR Privacy Policy Cookie Law</div><h3><a href="https://staging.easydigitalagency.it/gdpr-privacy-cookie-e-social-media/">GDPR privacy cookie social media</a></h3><p>Cos&amp;#8217;è il GDPR privacy cookie social media : come muoversi per rendere il tuo sito conforme al GDPR e alla Cookie Law? Indice dei Contenuti&amp;hellip;</p><div class="eda-foot"><span>17/03/2025</span><a class="eda-link" href="https://staging.easydigitalagency.it/gdpr-privacy-cookie-e-social-media/">Leggi articolo →</a></div></article></div></section><section id="cat-guide-web"><h2>guide web</h2><div class="eda-grid"><article class="eda-card"><div class="eda-cat">guide web</div><h3><a href="https://staging.easydigitalagency.it/come-creare-contenuti-video-per-i-social-faidate/">Come creare contenuti video per i social in modo professionale fai da te</a></h3><p>Realizzare video di qualità per i social non richiede sempre un set cinematografico: con un po’ di organizzazione,l’attrezzatura giusta e una strategia ben definita, puoi&amp;hellip;</p><div class="eda-foot"><span>13/08/2025</span><a class="eda-link" href="https://staging.easydigitalagency.it/come-creare-contenuti-video-per-i-social-faidate/">Leggi articolo →</a></div></article><article class="eda-card"><div class="eda-cat">guide web</div><h3><a href="https://staging.easydigitalagency.it/accessibilita-siti-web-2025/">Accessibilità siti web: cosa prevede la nuova normativa europea del 2025?</a></h3><p>L’accessibilità siti web 2025 non è solo un obbligo legale, ma un’opportunità per migliorare la user experience, ma vediamo quando è obbligatoria e quando no!&amp;hellip;</p><div class="eda-foot"><span>26/05/2025</span><a class="eda-link" href="https://staging.easydigitalagency.it/accessibilita-siti-web-2025/">Leggi articolo →</a></div></article></div></section><section id="cat-marketing"><h2>Marketing</h2><div class="eda-grid"><article class="eda-card"><div class="eda-cat">Marketing</div><h3><a href="https://staging.easydigitalagency.it/digital-agency-roma-crescere-online/">Digital Agency roma cos’è: scopriamo subito di cosa si occupa</a></h3><p>Digital agency roma cos’è: scopriamo subito di cosa si occupa Nel panorama del marketing e della comunicazione online, la domanda “digital agency roma cos’è” è&amp;hellip;</p><div class="eda-foot"><span>18/03/2025</span><a class="eda-link" href="https://staging.easydigitalagency.it/digital-agency-roma-crescere-online/">Leggi articolo →</a></div></article><article class="eda-card"><div class="eda-cat">Marketing</div><h3><a href="https://staging.easydigitalagency.it/web-agency-cos-e/">Web Agency cos’è: scopriamo subito di cosa si occupa</a></h3><p>Web Agency cos’è: scopriamo subito di cosa si occupa Nel mondo del marketing digitale, la domanda “web agency cos’è” è fondamentale per chiunque desideri migliorare&amp;hellip;</p><div class="eda-foot"><span>18/03/2025</span><a class="eda-link" href="https://staging.easydigitalagency.it/web-agency-cos-e/">Leggi articolo →</a></div></article></div></section><section id="cat-optimization"><h2>Optimization</h2><div class="eda-grid"><article class="eda-card"><div class="eda-cat">Optimization</div><h3><a href="https://staging.easydigitalagency.it/come-velocizzare-sito-wordpress-evitare-truffe/">Come velocizzare sito WordPress e come scegliere bene</a></h3><p>Come velocizzare sito WordPress e come non farsi fregare Indice dei contenuti Hosting: Importanza di un server performante per velocizzare sito WordPress Ottimizzazione delle immagini&amp;hellip;</p><div class="eda-foot"><span>17/03/2025</span><a class="eda-link" href="https://staging.easydigitalagency.it/come-velocizzare-sito-wordpress-evitare-truffe/">Leggi articolo →</a></div></article></div></section><section id="cat-web-agency-roma"><h2>Web Agency Roma</h2><div class="eda-grid"><article class="eda-card"><div class="eda-cat">Web Agency Roma</div><h3><a href="https://staging.easydigitalagency.it/quanto-costa-farsi-realizzare-un-sito-web/">Quanto costa farsi realizzare un sito web?</a></h3><p>Guida pratica ai costi reali di un sito web professionale: fasce di prezzo, differenze tra tema pronto e custom, tempi e budget da prevedere.</p><div class="eda-foot"><span>21/02/2026</span><a class="eda-link" href="https://staging.easydigitalagency.it/quanto-costa-farsi-realizzare-un-sito-web/">Leggi articolo →</a></div></article><article class="eda-card"><div class="eda-cat">Web Agency Roma</div><h3><a href="https://staging.easydigitalagency.it/sicurezza-wordpress-2026/">Sicurezza WordPress 2026: guida completa per proteggere il tuo sito e non perdere clienti</a></h3><p>Sicurezza WordPress 2026: guida completa per proteggere il tuo sito e non perdere clienti La sicurezza WordPress 2026 non è più un optional: se il&amp;hellip;</p><div class="eda-foot"><span>08/12/2025</span><a class="eda-link" href="https://staging.easydigitalagency.it/sicurezza-wordpress-2026/">Leggi articolo →</a></div></article><article class="eda-card"><div class="eda-cat">Web Agency Roma</div><h3><a href="https://staging.easydigitalagency.it/10-passi-per-fare-una-local-seo-spettacolare/">10 passi per fare una local seo spettacolare</a></h3><p>Se vuoi che la tua attività locale venga trovata su Google e Google Maps da potenziali clienti nella tua zona, allora è il momento di&amp;hellip;</p><div class="eda-foot"><span>02/08/2025</span><a class="eda-link" href="https://staging.easydigitalagency.it/10-passi-per-fare-una-local-seo-spettacolare/">Leggi articolo →</a></div></article><article class="eda-card"><div class="eda-cat">Web Agency Roma</div><h3><a href="https://staging.easydigitalagency.it/roma-web-agency-la-scelta-giusta-consigli/">Roma Web Agency: La scelta giusta per il tuo successo digitale</a></h3><p>Roma Web Agency: La scelta giusta per il tuo successo digitale Trovare la giusta agenzia Roma web agency non è semplice. Il digitale è un&amp;hellip;</p><div class="eda-foot"><span>07/03/2025</span><a class="eda-link" href="https://staging.easydigitalagency.it/roma-web-agency-la-scelta-giusta-consigli/">Leggi articolo →</a></div></article></div></section>
+      </section>
+    </main>
+
+    <aside class="eda-side">
+      <div class="eda-help">
+        <div class="eda-help-top">🤝 Help e Supporto Easy Digital Agency</div>
+        <h3>Hai bisogno di una mano con il tuo progetto o sito web?</h3>
+        <p>Non esitare a contattarci. Non esistono domande stupide: ti aiuteremo con chiarezza e senza complicazioni inutili.</p>
+        <p>👉 <a href="/contatti">Vai alla pagina contatti</a></p>
+        <p>📱 Scrivici su WhatsApp:</p>
+        <p>[njwa_button id="1255"]</p>
+      </div>
+      <div class="eda-cat-box">
+        <h3>Categorie articoli</h3>
+        <ul class="eda-cat-list">
+          <li><a href="#cat-aeo">aeo</a></li><li><a href="#cat-avvocato">Avvocato</a></li><li><a href="#cat-creare-sito-web-passo-passo">creare sito web passo passo</a></li><li><a href="#cat-gdpr-privacy-policy-cookie-law">GDPR Privacy Policy Cookie Law</a></li><li><a href="#cat-guide-web">guide web</a></li><li><a href="#cat-marketing">Marketing</a></li><li><a href="#cat-optimization">Optimization</a></li><li><a href="#cat-web-agency-roma">Web Agency Roma</a></li>
+        </ul>
+      </div>
+    </aside>
+  </div>
+</div>

@@ -1,13 +1,6 @@
 name: Publish Services Pages
 
 on:
-  push:
-    branches: ["main"]
-    paths:
-      - "content/services/**"
-      - "content/templates/**"
-      - "scripts/publish-services.sh"
-      - ".github/workflows/publish-services.yml"
   workflow_dispatch:
 
 jobs:
@@ -24,6 +17,10 @@ jobs:
       SERVICES_PARENT_INTRO: ${{ vars.SERVICES_PARENT_INTRO || 'Scopri i servizi digitali pensati per far crescere il tuo business online.' }}
       DEFAULT_PAGE_STATUS: ${{ vars.DEFAULT_PAGE_STATUS || 'draft' }}
       PARENT_PAGE_STATUS: ${{ vars.PARENT_PAGE_STATUS || 'publish' }}
+      DEFAULT_ARTICLE_STATUS: ${{ vars.DEFAULT_ARTICLE_STATUS || 'draft' }}
+      ARTICLE_BASE_PATH: ${{ vars.ARTICLE_BASE_PATH || '' }}
+      SERVICE_PAGE_TEMPLATE: ${{ vars.SERVICE_PAGE_TEMPLATE || 'elementor_header_footer' }}
+      PARENT_PAGE_TEMPLATE: ${{ vars.PARENT_PAGE_TEMPLATE || 'elementor_header_footer' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -36,5 +33,5 @@ jobs:
 
       - name: Publish pages
         run: |
-          chmod +x scripts/publish-services.sh
-          ./scripts/publish-services.sh
+          chmod +x scripts/publish-content.sh
+          ./scripts/publish-content.sh

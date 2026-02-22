@@ -26,6 +26,8 @@ services:
       WORDPRESS_DB_USER: ${MYSQL_USER}
       WORDPRESS_DB_PASSWORD: ${MYSQL_PASSWORD}
       WORDPRESS_TABLE_PREFIX: ${WORDPRESS_TABLE_PREFIX}
+      WORDPRESS_CONFIG_EXTRA: |
+        define('EDA_SSO_SECRET', '${EDA_SSO_SECRET}');
     volumes:
       - wp_data:/var/www/html
     labels:
@@ -51,6 +53,35 @@ services:
       - wp_internal
       - gruppo_proxy
 
+  manager-app:
+    build:
+      context: ./manager-app
+      dockerfile: Dockerfile
+    container_name: easydigital-manager
+    restart: unless-stopped
+    environment:
+      PORT: 3000
+      WP_BASE_URL: https://${WP_DOMAIN}
+      EDA_SSO_SECRET: ${EDA_SSO_SECRET}
+      DATA_DIR: /data
+      SMTP_HOST: ${SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT}
+      SMTP_USER: ${SMTP_USER}
+      SMTP_PASS: ${SMTP_PASS}
+      SMTP_FROM: ${SMTP_FROM}
+    volumes:
+      - manager_data:/data
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.easydigital-manager.rule=Host(`${WP_DOMAIN}`) && (PathPrefix(`/gestionale`) || PathPrefix(`/areapersonale`) || Path(`/logout`))
+      - traefik.http.routers.easydigital-manager.entrypoints=websecure
+      - traefik.http.routers.easydigital-manager.tls.certresolver=myresolver
+      - traefik.http.routers.easydigital-manager.priority=200
+      - traefik.http.services.easydigital-manager.loadbalancer.server.port=3000
+    networks:
+      - wp_internal
+      - gruppo_proxy
+
 networks:
   wp_internal:
   gruppo_proxy:
@@ -60,3 +91,4 @@ networks:
 volumes:
   wp_data:
   wp_db_data:
+  manager_data:

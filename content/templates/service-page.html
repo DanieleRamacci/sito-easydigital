@@ -48,6 +48,52 @@
     .eda-hero { margin-bottom: 40px; }
     .eda-hero-subtitle { font-size: 1.05rem; color: #4b5563; margin-bottom: 18px; }
     .eda-hero-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 16px; }
+    .eda-ai-title {
+      margin-top: 12px;
+      margin-bottom: 8px;
+      font-size: 0.92rem;
+      color: #374151;
+      font-weight: 600;
+    }
+    .eda-ai-actions {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 8px;
+      margin-top: 4px;
+      width: 100%;
+      max-width: 320px;
+    }
+    .eda-ai-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      width: 100%;
+      min-height: 42px;
+      padding: 9px 14px;
+      border-radius: 999px;
+      font-weight: 600;
+      font-size: 0.88rem;
+      text-decoration: none;
+      border: 1px solid #16a34a;
+      color: #16a34a;
+      background: #ffffff;
+    }
+    .eda-ai-btn:hover { background: #e6f7ec; }
+    .eda-ai-icon {
+      width: 18px;
+      height: 18px;
+      border-radius: 999px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.72rem;
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+    .eda-ai-icon-chatgpt { background: #e8f7ef; color: #0f9f4f; }
+    .eda-ai-icon-perplexity { background: #ecf4ff; color: #335fd1; }
     .eda-highlight { color: #16a34a; font-weight: 600; }
     .eda-section { margin-top: 40px; }
     .eda-section-lead { font-size: 1.02rem; color: #374151; max-width: 820px; }
@@ -78,6 +124,19 @@
           <a href="__CTA_PRIMARY_URL__" class="eda-button-primary">__CTA_PRIMARY_TEXT__ <span>→</span></a>
           <a href="/__SERVICES_PARENT_SLUG__/" class="eda-button-secondary">Torna a tutti i servizi</a>
         </div>
+        <div class="eda-ai-title">Fatti aiutare dall'AI: scopri in 1 minuto come questo servizio puo aiutarti</div>
+        <div class="eda-ai-actions">
+          <a
+            href="#"
+            class="eda-ai-btn"
+            onclick='window.open("https://chat.openai.com/?q=" + encodeURIComponent("__AI_PROMPT__"), "_blank"); return false;'
+          ><span class="eda-ai-icon eda-ai-icon-chatgpt">AI</span>Chiedi a ChatGPT</a>
+          <a
+            href="#"
+            class="eda-ai-btn"
+            onclick='window.open("https://www.perplexity.ai/search?q=" + encodeURIComponent("__AI_PROMPT__"), "_blank"); return false;'
+          ><span class="eda-ai-icon eda-ai-icon-perplexity">P</span>Chiedi a Perplexity</a>
+        </div>
       </div>
       <div class="eda-col">
         <div class="eda-card eda-hero-services-card">
@@ -89,6 +148,7 @@
   </section>
 
   <section class="eda-section">__SERVICE_BODY__</section>
+  __INLINE_LINKS_SECTION__
 
   <section class="eda-section">
     <h2>__CONTEXT_TITLE__</h2>
@@ -123,13 +183,34 @@
     </div>
   </aside>
 
+  __RELATED_SERVICES_SECTION__
+  __RELATED_ARTICLES_SECTION__
+
   <script type="application/ld+json">
   {
     "@context":"https://schema.org",
-    "@type":"Service",
-    "name":"__SEO_TITLE__",
-    "description":"__SEO_DESCRIPTION__",
-    "provider":{"@type":"Organization","name":"Easy Digital Agency"}
+    "@graph":[
+      {
+        "@type":"Organization",
+        "name":"Easy Digital Agency",
+        "url":"__SITE_BASE_URL__"
+      },
+      {
+        "@type":"WebPage",
+        "name":"__SEO_TITLE__",
+        "description":"__SEO_DESCRIPTION__",
+        "url":"__SERVICE_URL__",
+        "about":__AI_ENTITIES_JSON__
+      },
+      {
+        "@type":"Service",
+        "name":"__SEO_TITLE__",
+        "description":"__SEO_DESCRIPTION__",
+        "url":"__SERVICE_URL__",
+        "provider":{"@type":"Organization","name":"Easy Digital Agency"},
+        "areaServed":{"@type":"Place","name":"Roma"}
+      }
+    ]
   }
   </script>
 </div>
