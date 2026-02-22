@@ -235,8 +235,14 @@ app.use('/gestionale', requireAdmin);
 
 app.get('/gestionale', (req, res) => {
   const store = readStore();
-  const renewals = chronologicalRenewals(store);
-  const jobs = [...store.jobs].sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+  const allRenewals = chronologicalRenewals(store);
+  const allJobs = [...store.jobs].sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+  const jobQ = (req.query.job_q || '').toString().trim();
+  const jobStatus = (req.query.job_status || '').toString().trim();
+  const renewQ = (req.query.renew_q || '').toString().trim();
+  const renewPayment = (req.query.renew_payment || '').toString().trim();
+  const jobs = filterJobs(allJobs, store.customers, store.services, jobQ, jobStatus);
+  const renewals = filterRenewals(allRenewals, store.services, renewQ, renewPayment);
 
   const body = `
     <h1>Gestionale - Dashboard</h1>
@@ -244,20 +250,44 @@ app.get('/gestionale', (req, res) => {
       ${kpi('Clienti', String(store.customers.length))}
       ${kpi('Servizi catalogo', String(store.services.length))}
       ${kpi('Commesse aperte', String(store.jobs.filter((j) => !j.status.startsWith('chiusa_')).length))}
-      ${kpi('Rinnovi totali', String(renewals.length))}
+      ${kpi('Rinnovi totali', String(allRenewals.length))}
       ${kpi('Ticket aperti', String(store.tickets.filter((t) => t.status !== 'closed').length))}
     </div>
 
     <section class="card">
       <details>
         <summary><strong>Pipeline lavori/commesse</strong> (${jobs.length})</summary>
+        <div style="margin-top:12px" class="row-between">
+          <a class="btn-link" href="/gestionale/lavori/new">+ Nuova commessa</a>
+        </div>
+        <form method="get" action="/gestionale" class="filter-grid">
+          <input type="text" name="job_q" value="${esc(jobQ)}" placeholder="Cerca commessa/cliente/servizio" />
+          <select name="job_status">
+            <option value="">Tutti gli stati</option>
+            ${JOB_STATUS_OPTIONS.map((s) => `<option value="${s}" ${jobStatus === s ? 'selected' : ''}>${esc(labelJobStatus(s))}</option>`).join('')}
+          </select>
+          <input type="hidden" name="renew_q" value="${esc(renewQ)}" />
+          <input type="hidden" name="renew_payment" value="${esc(renewPayment)}" />
+          <button type="submit">Filtra</button>
+        </form>
         <div style="margin-top:12px">${renderJobsTable(jobs, store.customers, store.services, true)}</div>
       </details>
     </section>
 
     <section class="card">
       <h2>Rinnovi in ordine cronologico</h2>
-      ${renderRenewalsTable(renewals, store.services)}
+      <form method="get" action="/gestionale" class="filter-grid">
+        <input type="hidden" name="job_q" value="${esc(jobQ)}" />
+        <input type="hidden" name="job_status" value="${esc(jobStatus)}" />
+        <input type="text" name="renew_q" value="${esc(renewQ)}" placeholder="Cerca cliente/email/servizio" />
+        <select name="renew_payment">
+          <option value="">Stato pagamento: tutti</option>
+          <option value="pending" ${renewPayment === 'pending' ? 'selected' : ''}>In attesa</option>
+          <option value="paid" ${renewPayment === 'paid' ? 'selected' : ''}>Pagato</option>
+        </select>
+        <button type="submit">Filtra</button>
+      </form>
+      ${renderRenewalsTable(renewals, store.services, store.customers, true)}
     </section>
   `;
   res.send(renderAppLayout('Gestionale', body, req.user, true));
@@ -289,6 +319,9 @@ app.post('/gestionale/servizi/new', (req, res) => {
 
 app.get('/gestionale/clienti', (req, res) => {
   const store = readStore();
+  const q = (req.query.q || '').toString().trim();
+  const status = (req.query.status || '').toString().trim();
+  const filteredCustomers = filterCustomers(store.customers, q, status);
   const body = `
     <h1>Clienti</h1>
     <section class="card row-between">
@@ -298,7 +331,15 @@ app.get('/gestionale/clienti', (req, res) => {
 
     <section class="card">
       <h2>Tabella clienti</h2>
-      ${renderCustomersTable(store)}
+      <form method="get" action="/gestionale/clienti" class="filter-grid">
+        <input type="text" name="q" value="${esc(q)}" placeholder="Cerca azienda/referente/email/telefono" />
+        <select name="status">
+          <option value="">Tutti gli stati</option>
+          ${['active', 'invited', 'lead'].map((s) => `<option value="${s}" ${status === s ? 'selected' : ''}>${esc(s)}</option>`).join('')}
+        </select>
+        <button type="submit">Filtra</button>
+      </form>
+      ${renderCustomersTable(store, filteredCustomers)}
     </section>
   `;
   res.send(renderAppLayout('Gestionale - Clienti', body, req.user, true));
@@ -514,9 +555,9 @@ app.get('/gestionale/clienti/:id', (req, res) => {
 
         <div class="crm-tab-panel" data-panel="rinnovi">
           <h2>Prossimi rinnovi</h2>
-          ${renderRenewalsTable(upcoming, store.services)}
+          ${renderRenewalsTable(upcoming, store.services, store.customers, false)}
           <h2 style="margin-top:16px">Storico rinnovi/pagamenti</h2>
-          ${renderRenewalsTable(history, store.services)}
+          ${renderRenewalsTable(history, store.services, store.customers, false)}
         </div>
 
         <div class="crm-tab-panel" data-panel="ticket">
@@ -598,6 +639,7 @@ app.post('/gestionale/clienti/:id/assign', (req, res) => {
     billingInterval,
     priceAtSale: Number(service.price || 0),
     status: req.body.status || 'active',
+    paymentStatus: 'pending',
     notes: (req.body.notes || '').trim(),
     lastReminderSent: ''
   });
@@ -608,6 +650,9 @@ app.post('/gestionale/clienti/:id/assign', (req, res) => {
 
 app.get('/gestionale/lavori', (req, res) => {
   const store = readStore();
+  const q = (req.query.q || '').toString().trim();
+  const status = (req.query.status || '').toString().trim();
+  const rows = filterJobs(store.jobs, store.customers, store.services, q, status);
   const body = `
     <h1>Lavori / Commesse</h1>
     <section class="card row-between">
@@ -616,7 +661,15 @@ app.get('/gestionale/lavori', (req, res) => {
     </section>
 
     <section class="card">
-      ${renderJobsTable(store.jobs, store.customers, store.services, true)}
+      <form method="get" action="/gestionale/lavori" class="filter-grid">
+        <input type="text" name="q" value="${esc(q)}" placeholder="Cerca commessa/cliente/servizio" />
+        <select name="status">
+          <option value="">Tutti gli stati</option>
+          ${JOB_STATUS_OPTIONS.map((s) => `<option value="${s}" ${status === s ? 'selected' : ''}>${esc(labelJobStatus(s))}</option>`).join('')}
+        </select>
+        <button type="submit">Filtra</button>
+      </form>
+      ${renderJobsTable(rows, store.customers, store.services, true)}
     </section>
   `;
   res.send(renderAppLayout('Gestionale - Lavori', body, req.user, true));
@@ -732,15 +785,44 @@ app.post('/gestionale/lavori/:id/status', (req, res) => {
 
 app.get('/gestionale/rinnovi', (req, res) => {
   const store = readStore();
-  const renewals = chronologicalRenewals(store);
+  const q = (req.query.q || '').toString().trim();
+  const payment = (req.query.payment || '').toString().trim();
+  const renewals = filterRenewals(chronologicalRenewals(store), store.services, q, payment);
   const body = `
     <h1>Rinnovi</h1>
     <section class="card">
       <h2>Rinnovi in ordine cronologico</h2>
-      ${renderRenewalsTable(renewals, store.services)}
+      <form method="get" action="/gestionale/rinnovi" class="filter-grid">
+        <input type="text" name="q" value="${esc(q)}" placeholder="Cerca cliente/email/servizio" />
+        <select name="payment">
+          <option value="">Stato pagamento: tutti</option>
+          <option value="pending" ${payment === 'pending' ? 'selected' : ''}>In attesa</option>
+          <option value="paid" ${payment === 'paid' ? 'selected' : ''}>Pagato</option>
+        </select>
+        <button type="submit">Filtra</button>
+      </form>
+      ${renderRenewalsTable(renewals, store.services, store.customers, true)}
     </section>
   `;
   res.send(renderAppLayout('Gestionale - Rinnovi', body, req.user, true));
+});
+
+app.post('/gestionale/rinnovi/:id/payment', (req, res) => {
+  const store = readStore();
+  const id = Number(req.params.id || 0);
+  const sub = store.subscriptions.find((s) => Number(s.id) === id);
+  if (sub) {
+    const payment = req.body.paymentStatus === 'paid' ? 'paid' : 'pending';
+    sub.paymentStatus = payment;
+    if (payment === 'paid' && sub.billingType === 'subscription' && sub.renewalDate) {
+      sub.lastPaidAt = new Date().toISOString().slice(0, 10);
+      sub.renewalDate = computeRenewalDate(sub.renewalDate, sub.billingInterval || 'annual');
+      sub.paymentStatus = 'pending';
+    }
+    sub.updatedAt = new Date().toISOString();
+    writeStore(store);
+  }
+  res.redirect(req.get('referer') || '/gestionale/rinnovi');
 });
 
 app.get('/gestionale/ticket', (req, res) => {
@@ -868,6 +950,7 @@ function normalizeStore(store) {
     }
     if (!sub.billingType) sub.billingType = sub.renewalDate ? 'subscription' : 'one_time';
     if (!sub.billingInterval) sub.billingInterval = 'annual';
+    if (!sub.paymentStatus) sub.paymentStatus = 'pending';
     if (typeof sub.priceAtSale === 'undefined') sub.priceAtSale = 0;
   }
 
@@ -943,6 +1026,39 @@ function labelJobStatus(v) {
 function normalizeJobStatus(v) {
   const value = String(v || 'aperta');
   return JOB_STATUS_OPTIONS.includes(value) ? value : 'aperta';
+}
+
+function filterCustomers(customers, q, status) {
+  const query = String(q || '').toLowerCase();
+  return customers.filter((c) => {
+    if (status && c.status !== status) return false;
+    if (!query) return true;
+    const blob = `${c.company || ''} ${c.firstName || ''} ${c.lastName || ''} ${c.email || ''} ${c.phone || ''}`.toLowerCase();
+    return blob.includes(query);
+  });
+}
+
+function filterJobs(jobs, customers, services, q, status) {
+  const query = String(q || '').toLowerCase();
+  return jobs.filter((j) => {
+    if (status && j.status !== status) return false;
+    if (!query) return true;
+    const customer = customers.find((c) => Number(c.id) === Number(j.customerId || 0));
+    const service = services.find((s) => Number(s.id) === Number(j.serviceId || 0));
+    const blob = `${j.title || ''} ${j.notes || ''} ${customer?.company || ''} ${customer?.email || ''} ${service?.name || ''}`.toLowerCase();
+    return blob.includes(query);
+  });
+}
+
+function filterRenewals(rows, services, q, payment) {
+  const query = String(q || '').toLowerCase();
+  return rows.filter((r) => {
+    if (payment && ((r.paymentStatus === 'paid' ? 'paid' : 'pending') !== payment)) return false;
+    if (!query) return true;
+    const service = services.find((s) => Number(s.id) === Number(r.serviceId || 0));
+    const blob = `${r.company || ''} ${r.customerName || ''} ${r.email || ''} ${service?.name || ''}`.toLowerCase();
+    return blob.includes(query);
+  });
 }
 
 function renderServiceForm(action) {
@@ -1066,10 +1182,11 @@ function renderServicesTable(services) {
   return `<table class="tbl"><thead><tr><th>ID</th><th>Servizio</th><th>Prezzo</th><th>Tipo</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
-function renderCustomersTable(store) {
-  if (!store.customers.length) return '<p>Nessun cliente.</p>';
+function renderCustomersTable(store, customersOverride = null) {
+  const customers = Array.isArray(customersOverride) ? customersOverride : store.customers;
+  if (!customers.length) return '<p>Nessun cliente.</p>';
 
-  const rows = store.customers.map((c) => {
+  const rows = customers.map((c) => {
     const invite = store.invites.find((i) => i.customerId === c.id && i.status === 'pending');
     const inviteLink = invite ? `${WP_BASE_URL}/areapersonale/invito?token=${invite.token}` : '';
     return `<tr>
@@ -1079,7 +1196,7 @@ function renderCustomersTable(store) {
       <td>${esc(c.phone || '-')}</td>
       <td>${esc(c.vat || '-')}</td>
       <td>${esc(c.status)}</td>
-      <td>${inviteLink ? `<code>${esc(inviteLink)}</code>` : '-'}</td>
+      <td>${inviteLink ? `<button type="button" class="copy-btn" data-copy="${esc(inviteLink)}" title="Copia link invito">📋 Copia</button>` : '-'}</td>
     </tr>`;
   }).join('');
 
@@ -1152,13 +1269,26 @@ function renderAdminTickets(tickets, customers) {
   return `<table class="tbl"><thead><tr><th>ID</th><th>Cliente</th><th>Oggetto</th><th>Stato</th><th>Azione</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
-function renderRenewalsTable(rows, services) {
+function renderRenewalsTable(rows, services, customers = [], withActions = false) {
   if (!rows.length) return '<p>Nessun rinnovo.</p>';
   const htmlRows = rows.map((r) => {
     const srv = services.find((s) => s.id === r.serviceId);
-    return `<tr><td>${esc(r.renewalDate || '-')}</td><td>${esc(r.company || r.customerName)}</td><td>${esc(r.email)}</td><td>${esc(srv ? srv.name : 'N/A')}</td><td>${esc(labelBilling(r.billingType, r.billingInterval))}</td><td>${esc(r.status)}</td></tr>`;
+    const customer = customers.find((c) => Number(c.id) === Number(r.customerId || 0));
+    const customerLabel = esc(r.company || r.customerName || '-');
+    const customerCell = customer ? `<a href="/gestionale/clienti/${customer.id}">${customerLabel}</a>` : customerLabel;
+    const paymentLabel = r.paymentStatus === 'paid' ? 'Pagato' : 'In attesa';
+    const actionCell = withActions
+      ? `<form method="post" action="/gestionale/rinnovi/${r.id}/payment" style="display:flex;gap:8px;align-items:center">
+          <select name="paymentStatus">
+            <option value="pending" ${r.paymentStatus !== 'paid' ? 'selected' : ''}>In attesa</option>
+            <option value="paid" ${r.paymentStatus === 'paid' ? 'selected' : ''}>Pagato</option>
+          </select>
+          <button type="submit">Aggiorna</button>
+        </form>`
+      : paymentLabel;
+    return `<tr><td>${esc(r.renewalDate || '-')}</td><td>${customerCell}</td><td>${esc(r.email)}</td><td>${esc(srv ? srv.name : 'N/A')}</td><td>${esc(labelBilling(r.billingType, r.billingInterval))}</td><td>${esc(r.status)}</td><td>${actionCell}</td></tr>`;
   }).join('');
-  return `<table class="tbl"><thead><tr><th>Rinnovo</th><th>Cliente</th><th>Email</th><th>Servizio</th><th>Tipo</th><th>Stato</th></tr></thead><tbody>${htmlRows}</tbody></table>`;
+  return `<table class="tbl"><thead><tr><th>Rinnovo</th><th>Cliente</th><th>Email</th><th>Servizio</th><th>Tipo</th><th>Stato</th><th>Pagamento</th></tr></thead><tbody>${htmlRows}</tbody></table>`;
 }
 
 function renderPipeline(currentStage) {
@@ -1195,12 +1325,14 @@ function renderJobsTable(jobs, customers, services, includeActions) {
     .map((j) => {
       const customer = customers.find((c) => Number(c.id) === Number(j.customerId || 0));
       const service = services.find((s) => Number(s.id) === Number(j.serviceId || 0));
+      const customerName = customer ? (customer.company || `${customer.firstName} ${customer.lastName}`) : 'N/A';
+      const customerCell = customer ? `<a href="/gestionale/clienti/${customer.id}">${esc(customerName)}</a>` : esc(customerName);
       const actions = includeActions
         ? `<form method="post" action="/gestionale/lavori/${j.id}/status" style="display:flex;gap:8px;align-items:center"><select name="status">${JOB_STATUS_OPTIONS.map((s) => `<option value="${s}" ${j.status === s ? 'selected' : ''}>${esc(labelJobStatus(s))}</option>`).join('')}</select><button type="submit">Aggiorna</button></form>`
         : '-';
       return `<tr>
         <td>${esc(j.title)}</td>
-        <td>${esc(customer ? (customer.company || `${customer.firstName} ${customer.lastName}`) : 'N/A')}</td>
+        <td>${customerCell}</td>
         <td>${esc(service ? service.name : '-')}</td>
         <td>${esc(j.dueDate || '-')}</td>
         <td>€ ${Number(j.amount || 0).toFixed(2)}</td>
@@ -1327,6 +1459,21 @@ function renderAppLayout(title, body, user, isAdmin) {
       </header>
       <main>${body}</main>
     </div>
+    <script>
+      (function () {
+        document.querySelectorAll('.copy-btn[data-copy]').forEach((btn) => {
+          btn.addEventListener('click', async () => {
+            const value = btn.getAttribute('data-copy') || '';
+            try {
+              await navigator.clipboard.writeText(value);
+              const old = btn.textContent;
+              btn.textContent = 'Copiato';
+              setTimeout(() => { btn.textContent = old; }, 1200);
+            } catch (_e) {}
+          });
+        });
+      })();
+    </script>
   </body>
   </html>`;
 }
@@ -1351,12 +1498,15 @@ function baseStyles() {
     .kpi-label { color:var(--muted); font-size:.85rem; }
     .kpi-value { font-size:1.45rem; font-weight:700; color:#165f34; }
     .form-grid { display:grid; gap:10px; }
+    .filter-grid { display:grid; gap:10px; grid-template-columns: 1.5fr 1fr auto; margin: 10px 0; align-items:end; }
     .two-col { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .row-between { display:flex; justify-content:space-between; align-items:center; gap:12px; }
     input, select, textarea, button { font:inherit; }
     input, select, textarea { width:100%; padding:10px 11px; border:1px solid var(--line); border-radius:8px; background:#fff; }
     button { border:1px solid #2f9f57; background:#3dae63; color:#fff; border-radius:8px; padding:10px 12px; cursor:pointer; font-weight:600; }
     button:hover { background:#2f9f57; }
+    .copy-btn { border:1px solid var(--line); background:#fff; color:#111; border-radius:8px; padding:6px 9px; cursor:pointer; }
+    .copy-btn:hover { border-color:var(--g); color:var(--g); }
     .tbl { width:100%; border-collapse:collapse; }
     .tbl th, .tbl td { border-bottom:1px solid #ecf1ed; text-align:left; padding:8px; font-size:.93rem; vertical-align:top; }
     .tbl th { color:#334155; background:#f8fbf9; position: sticky; top: 0; }
@@ -1383,6 +1533,6 @@ function baseStyles() {
     .crm-notes-list { margin-top:12px; display:grid; gap:8px; }
     .crm-note { border:1px solid var(--line); border-radius:8px; padding:10px; background:#f8fbf9; }
     .status-badge { border:1px solid #bbf7d0; color:#166534; background:#e9f8ef; border-radius:999px; padding:3px 8px; font-size:.82rem; }
-    @media (max-width:900px){ .top {flex-direction:column;} .two-col { grid-template-columns:1fr; } .row-between { flex-direction:column; align-items:flex-start; } .crm-layout { grid-template-columns:1fr; } .crm-steps { min-width:unset; flex-direction:column; align-items:flex-start; } }
+    @media (max-width:900px){ .top {flex-direction:column;} .two-col { grid-template-columns:1fr; } .filter-grid { grid-template-columns:1fr; } .row-between { flex-direction:column; align-items:flex-start; } .crm-layout { grid-template-columns:1fr; } .crm-steps { min-width:unset; flex-direction:column; align-items:flex-start; } }
   </style>`;
 }
