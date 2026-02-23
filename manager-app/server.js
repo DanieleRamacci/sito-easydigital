@@ -517,7 +517,6 @@ app.post('/gestionale/clienti/new', async (req, res) => {
 app.get('/gestionale/clienti/:id', (req, res) => {
   const store = readStore();
   const id = Number(req.params.id || 0);
-  const selectedYear = Number(req.query.year || 0) || new Date().getFullYear();
   const customer = store.customers.find((c) => Number(c.id) === id);
   if (!customer) {
     return res.status(404).send(renderPublicPage('Cliente non trovato', '<p>Cliente non trovato.</p>'));
@@ -526,12 +525,7 @@ app.get('/gestionale/clienti/:id', (req, res) => {
   const customerSubs = store.subscriptions.filter((s) => Number(s.customerId) === id);
   const customerTickets = store.tickets.filter((t) => Number(t.customerId || 0) === id);
   const customerJobs = store.jobs.filter((j) => Number(j.customerId || 0) === id);
-  const upcoming = customerSubs
-    .filter((s) => s.billingType === 'subscription' && s.renewalDate)
-    .sort((a, b) => String(a.renewalDate).localeCompare(String(b.renewalDate)));
-  const history = customerSubs
-    .filter((s) => s.renewalDate)
-    .sort((a, b) => String(b.renewalDate).localeCompare(String(a.renewalDate)));
+  const workItems = buildCustomerWorkItems(customerJobs, customerSubs, store.services);
 
   const serviceOptions = store.services
     .map((s) => `<option value="${s.id}">${esc(s.name)} (${labelBilling(s.billingType, s.billingInterval)})</option>`)
@@ -544,16 +538,15 @@ app.get('/gestionale/clienti/:id', (req, res) => {
   const totalValue = customerSubs.reduce((sum, s) => sum + Number(s.priceAtSale || 0), 0);
   const customerNotes = Array.isArray(customer.notes) ? [...customer.notes].sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || ''))) : [];
   const customerPayments = Array.isArray(customer.payments) ? customer.payments : [];
-  const expectedAnnualTotal = computeExpectedAnnualTotal(customerSubs, selectedYear);
-  const paymentsForYear = customerPayments.filter((p) => Number(p.year || new Date(p.date || '').getFullYear()) === selectedYear);
-  const paidAnnualTotal = paymentsForYear.reduce((sum, p) => sum + Number(p.amount || 0), 0);
-  const annualRemaining = Math.max(0, expectedAnnualTotal - paidAnnualTotal);
-  const paymentsRows = paymentsForYear.length
-    ? paymentsForYear
+  const totalDue = computeOutstandingTotalFromItems(workItems);
+  const paidTotal = customerPayments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
+  const remaining = Math.max(0, totalDue - paidTotal);
+  const paymentsRows = customerPayments.length
+    ? customerPayments
       .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')))
       .map((p) => `<tr><td>${esc(formatDateItShort(p.date || '-'))}</td><td>€ ${Number(p.amount || 0).toFixed(2)}</td><td>${esc(p.note || '-')}</td></tr>`)
       .join('')
-    : '<tr><td colspan="3" class="muted">Nessun versamento registrato per questo anno.</td></tr>';
+    : '<tr><td colspan="3" class="muted">Nessun versamento registrato.</td></tr>';
   const contacts = Array.isArray(customer.crmContacts) ? customer.crmContacts : [];
   const contactsList = contacts.length
     ? contacts.map((c) => `<li class="contact-item">
@@ -645,16 +638,14 @@ app.get('/gestionale/clienti/:id', (req, res) => {
 
       <section class="card crm-right">
         <div class="crm-tabs">
-          <button class="crm-tab-btn is-active" data-tab="sequenza">Sequenza temporale</button>
+          <button class="crm-tab-btn" data-tab="sequenza">Sequenza temporale</button>
           <button class="crm-tab-btn" data-tab="note">Note (${customerNotes.length})</button>
-          <button class="crm-tab-btn" data-tab="servizi">Servizi</button>
-          <button class="crm-tab-btn" data-tab="rinnovi">Abbonamenti</button>
+          <button class="crm-tab-btn is-active" data-tab="lavori">Lavori</button>
           <button class="crm-tab-btn" data-tab="pagamenti">Pagamenti</button>
           <button class="crm-tab-btn" data-tab="ticket">Ticket</button>
-          <button class="crm-tab-btn" data-tab="commesse">Commesse</button>
         </div>
 
-        <div class="crm-tab-panel is-active" data-panel="sequenza">
+        <div class="crm-tab-panel" data-panel="sequenza">
           ${renderJobsTimeline(customerJobs)}
         </div>
 
@@ -666,9 +657,9 @@ app.get('/gestionale/clienti/:id', (req, res) => {
           ${renderCustomerNotes(customerNotes)}
         </div>
 
-        <div class="crm-tab-panel" data-panel="servizi">
+        <div class="crm-tab-panel is-active" data-panel="lavori">
           <section class="card">
-            <h2>Aggiungi servizio</h2>
+            <h2>Aggiungi servizio / abbonamento</h2>
             <form method="post" action="/gestionale/clienti/${id}/assign" class="form-grid two-col">
               <select name="serviceId">
                 <option value="">Aggiungi dalla lista o crea nuovo</option>
@@ -712,30 +703,24 @@ app.get('/gestionale/clienti/:id', (req, res) => {
               <button type="submit">Associa servizio</button>
             </form>
           </section>
-          ${renderSubscriptionsTableForAdmin(customerSubs, store.services, true)}
-        </div>
-
-        <div class="crm-tab-panel" data-panel="rinnovi">
-          <h2>Prossimi abbonamenti in scadenza</h2>
-          ${renderRenewalsTable(upcoming, store.services, store.customers, false)}
-          <h2 style="margin-top:16px">Storico abbonamenti / pagamenti</h2>
-          ${renderRenewalsTable(history, store.services, store.customers, false)}
+          <section class="card">
+            <div class="row-between">
+              <h2>Richieste e servizi del cliente</h2>
+              <a class="btn-link" href="/gestionale/lavori/new?customerId=${id}">+ Nuovo lavoro una tantum</a>
+            </div>
+            ${renderCustomerWorkItemsTable(workItems)}
+          </section>
         </div>
 
         <div class="crm-tab-panel" data-panel="pagamenti">
           <section class="card">
-            <h2>Gestione versamenti annuali</h2>
-            <form method="get" action="/gestionale/clienti/${id}" class="inline-actions" style="margin-bottom:10px">
-              <input type="number" name="year" min="2020" max="2100" value="${selectedYear}" />
-              <button type="submit">Cambia anno</button>
-            </form>
+            <h2>Gestione versamenti cliente</h2>
             <div class="kpi-grid">
-              ${kpi(`Totale dovuto ${selectedYear}`, `€ ${expectedAnnualTotal.toFixed(2)}`)}
-              ${kpi(`Versato ${selectedYear}`, `€ ${paidAnnualTotal.toFixed(2)}`)}
-              ${kpi(`Residuo ${selectedYear}`, `€ ${annualRemaining.toFixed(2)}`)}
+              ${kpi('Totale dovuto', `€ ${totalDue.toFixed(2)}`)}
+              ${kpi('Versato', `€ ${paidTotal.toFixed(2)}`)}
+              ${kpi('Residuo', `€ ${remaining.toFixed(2)}`)}
             </div>
             <form method="post" action="/gestionale/clienti/${id}/payments/new" class="form-grid two-col" style="margin-top:12px">
-              <input type="hidden" name="year" value="${selectedYear}" />
               <input type="date" name="date" required />
               <input type="number" name="amount" step="0.01" min="0.01" placeholder="Importo versato" required />
               <input type="text" name="note" placeholder="Nota versamento (opzionale)" />
@@ -750,10 +735,6 @@ app.get('/gestionale/clienti/:id', (req, res) => {
 
         <div class="crm-tab-panel" data-panel="ticket">
           ${renderAdminTickets(customerTickets, [customer])}
-        </div>
-
-        <div class="crm-tab-panel" data-panel="commesse">
-          ${renderJobsTable(customerJobs, store.customers, store.services, true)}
         </div>
       </section>
     </section>
@@ -826,10 +807,9 @@ app.post('/gestionale/clienti/:id/payments/new', (req, res) => {
 
   const amount = Number(req.body.amount || 0);
   const date = (req.body.date || '').trim();
-  const year = Number(req.body.year || 0) || new Date().getFullYear();
   const note = (req.body.note || '').trim();
   if (!date || !Number.isFinite(amount) || amount <= 0) {
-    return res.redirect(`/gestionale/clienti/${customerId}?year=${year}`);
+    return res.redirect(`/gestionale/clienti/${customerId}`);
   }
 
   if (!Array.isArray(customer.payments)) customer.payments = [];
@@ -838,12 +818,11 @@ app.post('/gestionale/clienti/:id/payments/new', (req, res) => {
     date,
     amount,
     note,
-    year,
     createdAt: new Date().toISOString()
   });
   customer.updatedAt = new Date().toISOString();
   writeStore(store);
-  return res.redirect(`/gestionale/clienti/${customerId}?year=${year}`);
+  return res.redirect(`/gestionale/clienti/${customerId}`);
 });
 
 app.post('/gestionale/clienti/:id/contacts/delete', (req, res) => {
@@ -1220,6 +1199,7 @@ app.post('/gestionale/lavori/new', (req, res) => {
     productTotal: Number(req.body.productTotal || 0),
     dueDate: (req.body.dueDate || '').trim(),
     amount: Number(req.body.amount || 0),
+    paymentStatus: 'pending',
     status,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
@@ -1292,6 +1272,18 @@ app.post('/gestionale/lavori/:id/status', (req, res) => {
   const job = store.jobs.find((j) => Number(j.id) === id);
   if (job) {
     job.status = status;
+    job.updatedAt = new Date().toISOString();
+    writeStore(store);
+  }
+  res.redirect(req.get('referer') || '/gestionale/lavori');
+});
+
+app.post('/gestionale/lavori/:id/payment', (req, res) => {
+  const store = readStore();
+  const id = Number(req.params.id || 0);
+  const job = store.jobs.find((j) => Number(j.id) === id);
+  if (job) {
+    job.paymentStatus = req.body.paymentStatus === 'paid' ? 'paid' : 'pending';
     job.updatedAt = new Date().toISOString();
     writeStore(store);
   }
@@ -1500,6 +1492,7 @@ function normalizeStore(store) {
   for (const job of s.jobs) {
     if (!job.status) job.status = 'qualificazione_preventivo';
     job.status = normalizeJobStatus(job.status);
+    if (!job.paymentStatus) job.paymentStatus = 'pending';
   }
 
   for (const customer of s.customers) {
@@ -1572,6 +1565,81 @@ function computeExpectedAnnualTotal(subs, year) {
     if (y !== Number(year)) return sum;
     return sum + Number(s.priceAtSale || 0);
   }, 0);
+}
+
+function buildCustomerWorkItems(jobs, subs, services) {
+  const jobItems = jobs.map((j) => ({
+    kind: 'job',
+    id: Number(j.id),
+    label: j.title || 'Lavoro',
+    typeLabel: 'Una tantum',
+    statusKey: j.status || '',
+    statusLabel: labelJobStatus(j.status),
+    dueDate: j.dueDate || '',
+    amount: Number(j.amount || 0),
+    paymentStatus: j.paymentStatus === 'paid' ? 'paid' : 'pending'
+  }));
+
+  const subItems = subs.map((s) => {
+    const srv = services.find((x) => Number(x.id) === Number(s.serviceId || 0));
+    return {
+      kind: 'subscription',
+      id: Number(s.id),
+      label: srv ? srv.name : 'Servizio',
+      typeLabel: s.billingType === 'subscription' ? 'Abbonamento' : 'Una tantum',
+      statusKey: s.status || '',
+      statusLabel: s.status || '-',
+      dueDate: s.renewalDate || s.purchaseDate || '',
+      amount: Number(s.priceAtSale || 0),
+      paymentStatus: s.paymentStatus === 'paid' ? 'paid' : 'pending'
+    };
+  });
+
+  return [...jobItems, ...subItems].sort((a, b) => String(a.dueDate || '').localeCompare(String(b.dueDate || '')));
+}
+
+function computeOutstandingTotalFromItems(items) {
+  return items.reduce((sum, item) => {
+    if (item.paymentStatus === 'paid') return sum;
+    if (item.kind === 'job' && item.statusKey === 'chiusa_persa') return sum;
+    return sum + Number(item.amount || 0);
+  }, 0);
+}
+
+function renderCustomerWorkItemsTable(items) {
+  if (!items.length) return '<p>Nessun lavoro o servizio associato.</p>';
+  const rows = items.map((item) => {
+    const payForm = item.kind === 'job'
+      ? `<form method="post" action="/gestionale/lavori/${item.id}/payment" class="inline-actions">
+          <select name="paymentStatus">
+            <option value="pending" ${item.paymentStatus !== 'paid' ? 'selected' : ''}>Non pagato</option>
+            <option value="paid" ${item.paymentStatus === 'paid' ? 'selected' : ''}>Pagato</option>
+          </select>
+          <button type="submit">Salva</button>
+        </form>`
+      : `<form method="post" action="/gestionale/rinnovi/${item.id}/payment" class="inline-actions">
+          <select name="paymentStatus">
+            <option value="pending" ${item.paymentStatus !== 'paid' ? 'selected' : ''}>Non pagato</option>
+            <option value="paid" ${item.paymentStatus === 'paid' ? 'selected' : ''}>Pagato</option>
+          </select>
+          <button type="submit">Salva</button>
+        </form>`;
+
+    const openLink = item.kind === 'job'
+      ? `<a class="btn-link" href="/gestionale/lavori/${item.id}">Apri scheda</a>`
+      : '';
+
+    return `<tr>
+      <td>${esc(item.label)}</td>
+      <td>${esc(item.typeLabel)}</td>
+      <td>${esc(item.statusLabel)}</td>
+      <td>${esc(formatDateItShort(item.dueDate || '-'))}</td>
+      <td>€ ${Number(item.amount || 0).toFixed(2)}</td>
+      <td><div class="inline-actions">${payForm}${openLink}</div></td>
+    </tr>`;
+  }).join('');
+
+  return `<table class="tbl"><thead><tr><th>Voce</th><th>Tipo</th><th>Stato</th><th>Data</th><th>Importo</th><th>Pagamento</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
 function kpi(label, value) {
@@ -1843,6 +1911,7 @@ function importCrmCsvData(store, input) {
       productTotal: 0,
       dueDate: normalizeDate(row['Data di chiusura']),
       amount: normalizeMoney(row.Valore),
+      paymentStatus: 'pending',
       status: phaseToJobStatus(row.Fase),
       crmDealId,
       crmCompanyId,
