@@ -2,6 +2,7 @@ const express = require('express');
 const cookieParser = require('cookie-parser');
 const fs = require('fs');
 const path = require('path');
+const multer = require('multer');
 const jwt = require('jsonwebtoken');
 const cron = require('node-cron');
 const nodemailer = require('nodemailer');
@@ -23,6 +24,10 @@ const SMTP_PORT = Number(process.env.SMTP_PORT || 587);
 const SMTP_USER = process.env.SMTP_USER || '';
 const SMTP_PASS = process.env.SMTP_PASS || '';
 const SMTP_FROM = process.env.SMTP_FROM || '';
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 8 * 1024 * 1024 }
+});
 
 const JOB_STATUS_OPTIONS = [
   'qualificazione_preventivo',
@@ -326,9 +331,6 @@ app.post('/gestionale/servizi/new', (req, res) => {
 });
 
 app.get('/gestionale/importazioni', (req, res) => {
-  const companiesPath = (req.query.companiesPath || '').toString().trim();
-  const contactsPath = (req.query.contactsPath || '').toString().trim();
-  const pipelinesPath = (req.query.pipelinesPath || '').toString().trim();
   const msg = (req.query.msg || '').toString().trim();
   const body = `
     <h1>Importazioni CRM</h1>
@@ -336,10 +338,16 @@ app.get('/gestionale/importazioni', (req, res) => {
     <section class="card">
       <h2>Importa Aziende, Contatti e Lavori da CSV</h2>
       <p class="muted">I file vengono collegati tramite ID sorgente (azienda/contatto/affare). Le fasi pipeline vengono mappate sugli stati del gestionale.</p>
-      <form method="post" action="/gestionale/importazioni/run" class="form-grid">
-        <input type="text" name="companiesPath" value="${esc(companiesPath)}" placeholder="/percorso/Companies_....csv" required />
-        <input type="text" name="contactsPath" value="${esc(contactsPath)}" placeholder="/percorso/Contacts_....csv" required />
-        <input type="text" name="pipelinesPath" value="${esc(pipelinesPath)}" placeholder="/percorso/Pipelines_....csv" required />
+      <form method="post" action="/gestionale/importazioni/run" enctype="multipart/form-data" class="form-grid">
+        <label><strong>Aziende CSV</strong></label>
+        <input type="file" name="companiesFile" accept=".csv,text/csv" required />
+
+        <label><strong>Contatti CSV</strong></label>
+        <input type="file" name="contactsFile" accept=".csv,text/csv" required />
+
+        <label><strong>Pipeline / Affari CSV</strong></label>
+        <input type="file" name="pipelinesFile" accept=".csv,text/csv" required />
+
         <label style="display:flex;align-items:center;gap:8px">
           <input type="checkbox" name="replaceExisting" value="1" />
           <span>Sostituisci tutti i clienti e lavori attuali prima dell'import</span>
@@ -351,18 +359,26 @@ app.get('/gestionale/importazioni', (req, res) => {
   res.send(renderAppLayout('Gestionale - Importazioni', body, req.user, true));
 });
 
-app.post('/gestionale/importazioni/run', (req, res) => {
-  const companiesPath = (req.body.companiesPath || '').toString().trim();
-  const contactsPath = (req.body.contactsPath || '').toString().trim();
-  const pipelinesPath = (req.body.pipelinesPath || '').toString().trim();
+app.post('/gestionale/importazioni/run', upload.fields([
+  { name: 'companiesFile', maxCount: 1 },
+  { name: 'contactsFile', maxCount: 1 },
+  { name: 'pipelinesFile', maxCount: 1 }
+]), (req, res) => {
   const replaceExisting = req.body.replaceExisting === '1';
 
   try {
+    const companiesFile = req.files?.companiesFile?.[0] || null;
+    const contactsFile = req.files?.contactsFile?.[0] || null;
+    const pipelinesFile = req.files?.pipelinesFile?.[0] || null;
+    if (!companiesFile || !contactsFile || !pipelinesFile) {
+      throw new Error('Carica tutti e 3 i file CSV: aziende, contatti, pipeline');
+    }
+
     const store = readStore();
     const summary = importCrmCsvData(store, {
-      companiesPath,
-      contactsPath,
-      pipelinesPath,
+      companiesCsvText: companiesFile.buffer.toString('utf8'),
+      contactsCsvText: contactsFile.buffer.toString('utf8'),
+      pipelinesCsvText: pipelinesFile.buffer.toString('utf8'),
       replaceExisting
     });
     writeStore(store);
@@ -370,13 +386,7 @@ app.post('/gestionale/importazioni/run', (req, res) => {
     return res.redirect('/gestionale/importazioni?msg=' + encodeURIComponent(msg));
   } catch (err) {
     const msg = `Errore importazione: ${err.message || 'errore sconosciuto'}`;
-    const qs = new URLSearchParams({
-      msg,
-      companiesPath,
-      contactsPath,
-      pipelinesPath
-    });
-    return res.redirect('/gestionale/importazioni?' + qs.toString());
+    return res.redirect('/gestionale/importazioni?msg=' + encodeURIComponent(msg));
   }
 });
 
@@ -1392,16 +1402,22 @@ function filterRenewals(rows, services, q, payment) {
 }
 
 function importCrmCsvData(store, input) {
+  const companiesCsvText = typeof input.companiesCsvText === 'string' ? input.companiesCsvText : '';
+  const contactsCsvText = typeof input.contactsCsvText === 'string' ? input.contactsCsvText : '';
+  const pipelinesCsvText = typeof input.pipelinesCsvText === 'string' ? input.pipelinesCsvText : '';
   const companiesPath = String(input.companiesPath || '').trim();
   const contactsPath = String(input.contactsPath || '').trim();
   const pipelinesPath = String(input.pipelinesPath || '').trim();
-  if (!companiesPath || !contactsPath || !pipelinesPath) {
-    throw new Error('Percorsi CSV mancanti');
-  }
 
-  const companiesRows = parseCsvObjects(companiesPath);
-  const contactsRows = parseCsvObjects(contactsPath);
-  const pipelinesRows = parseCsvObjects(pipelinesPath);
+  const companiesRows = companiesCsvText
+    ? parseCsvObjectsFromText('companies.csv', companiesCsvText)
+    : parseCsvObjects(companiesPath);
+  const contactsRows = contactsCsvText
+    ? parseCsvObjectsFromText('contacts.csv', contactsCsvText)
+    : parseCsvObjects(contactsPath);
+  const pipelinesRows = pipelinesCsvText
+    ? parseCsvObjectsFromText('pipelines.csv', pipelinesCsvText)
+    : parseCsvObjects(pipelinesPath);
 
   if (input.replaceExisting) {
     store.customers = [];
@@ -1604,9 +1620,17 @@ function importCrmCsvData(store, input) {
 function parseCsvObjects(filePath) {
   if (!fs.existsSync(filePath)) throw new Error(`File non trovato: ${filePath}`);
   const text = fs.readFileSync(filePath, 'utf8');
-  const rows = parseCsvRows(text);
+  return parseCsvObjectsFromText(filePath, text);
+}
+
+function parseCsvObjectsFromText(sourceName, text) {
+  const normalizedText = String(text || '').replace(/^\uFEFF/, '');
+  const rows = parseCsvRows(normalizedText);
   if (!rows.length) return [];
   const headers = rows[0].map((h) => String(h || '').trim());
+  if (!headers.length) {
+    throw new Error(`CSV non valido (${sourceName})`);
+  }
   return rows.slice(1).map((cells) => {
     const obj = {};
     for (let i = 0; i < headers.length; i += 1) {
