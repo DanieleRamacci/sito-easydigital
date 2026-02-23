@@ -248,6 +248,10 @@ app.use('/gestionale', requireAdmin);
 
 app.get('/gestionale', (req, res) => {
   const store = readStore();
+  const annualService = ensureAnnualManagementService(store);
+  const annualCustomerOptions = store.customers
+    .map((c) => `<option value="${c.id}">${esc(c.company || `${c.firstName} ${c.lastName}`)} - ${esc(c.email || '-')}</option>`)
+    .join('');
   const allRenewals = chronologicalRenewals(store);
   const allJobs = [...store.jobs].sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
   const jobQ = (req.query.job_q || '').toString().trim();
@@ -288,6 +292,21 @@ app.get('/gestionale', (req, res) => {
     </section>
 
     <section class="card">
+      <h2>Abbonamento gestione annuale (manuale)</h2>
+      <form method="post" action="/gestionale/abbonamenti/annuale" class="form-grid two-col">
+        <select name="customerId" required>
+          <option value="">Seleziona cliente</option>
+          ${annualCustomerOptions}
+        </select>
+        <input type="date" name="purchaseDate" required />
+        <input type="number" name="customPrice" step="0.01" min="0" placeholder="Prezzo custom (opzionale)" />
+        <input type="text" name="notes" placeholder="Note abbonamento" />
+        <input type="hidden" name="serviceId" value="${annualService.id}" />
+        <button type="submit">Associa Gestione annuale</button>
+      </form>
+    </section>
+
+    <section class="card">
       <h2>Rinnovi in ordine cronologico</h2>
       <form method="get" action="/gestionale" class="filter-grid">
         <input type="hidden" name="job_q" value="${esc(jobQ)}" />
@@ -304,6 +323,45 @@ app.get('/gestionale', (req, res) => {
     </section>
   `;
   res.send(renderAppLayout('Gestionale', body, req.user, true));
+});
+
+app.post('/gestionale/abbonamenti/annuale', (req, res) => {
+  const store = readStore();
+  const customerId = Number(req.body.customerId || 0);
+  const customer = store.customers.find((c) => Number(c.id) === customerId);
+  if (!customer) return res.redirect('/gestionale');
+
+  const serviceId = Number(req.body.serviceId || 0) || ensureAnnualManagementService(store).id;
+  const service = store.services.find((s) => Number(s.id) === serviceId) || ensureAnnualManagementService(store);
+  const purchaseDate = (req.body.purchaseDate || '').trim();
+  if (!purchaseDate) return res.redirect('/gestionale');
+
+  const customPrice = Number(req.body.customPrice || 0);
+  const priceAtSale = customPrice > 0 ? customPrice : Number(service.price || 0);
+
+  store.subscriptions.unshift({
+    id: nextId(store.subscriptions),
+    customerId: customer.id,
+    wpUserId: customer.wpUserId || null,
+    customerName: `${customer.firstName} ${customer.lastName}`.trim(),
+    company: customer.company,
+    email: customer.email,
+    serviceId: service.id,
+    purchaseDate,
+    renewalDate: computeRenewalDate(purchaseDate, 'annual'),
+    billingType: 'subscription',
+    billingInterval: 'annual',
+    priceAtSale,
+    status: 'active',
+    paymentStatus: 'pending',
+    notes: (req.body.notes || '').trim(),
+    lastReminderSent: '',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  });
+
+  writeStore(store);
+  return res.redirect('/gestionale');
 });
 
 app.get('/gestionale/servizi', (req, res) => {
@@ -606,7 +664,7 @@ app.get('/gestionale/clienti/:id', (req, res) => {
           <button class="crm-tab-btn is-active" data-tab="sequenza">Sequenza temporale</button>
           <button class="crm-tab-btn" data-tab="note">Note (${customerNotes.length})</button>
           <button class="crm-tab-btn" data-tab="servizi">Servizi</button>
-          <button class="crm-tab-btn" data-tab="rinnovi">Rinnovi</button>
+          <button class="crm-tab-btn" data-tab="rinnovi">Abbonamenti</button>
           <button class="crm-tab-btn" data-tab="ticket">Ticket</button>
           <button class="crm-tab-btn" data-tab="commesse">Commesse</button>
         </div>
@@ -625,26 +683,27 @@ app.get('/gestionale/clienti/:id', (req, res) => {
 
         <div class="crm-tab-panel" data-panel="servizi">
           <section class="card">
-            <h2>Associa servizio</h2>
+            <h2>Aggiungi servizio</h2>
             <form method="post" action="/gestionale/clienti/${id}/assign" class="form-grid two-col">
               <select name="serviceId">
-                <option value="">Crea nuovo servizio al volo</option>
+                <option value="">Aggiungi dalla lista o crea nuovo</option>
                 ${serviceOptions}
               </select>
-              <input name="newServiceName" type="text" placeholder="Nuovo servizio: nome" />
+              <input type="date" name="purchaseDate" required />
 
+              <input name="newServiceName" type="text" placeholder="Nuovo servizio: nome (opzionale)" />
               <input name="newServicePrice" type="number" step="0.01" min="0" placeholder="Nuovo servizio: prezzo" />
+              <input name="customPrice" type="number" step="0.01" min="0" placeholder="Prezzo custom vendita (opzionale)" />
+
               <select name="newServiceBillingType">
                 <option value="one_time">Nuovo servizio: una tantum</option>
                 <option value="subscription">Nuovo servizio: abbonamento</option>
               </select>
-
               <select name="newServiceBillingInterval">
                 <option value="monthly">Nuovo servizio: mensile</option>
                 <option value="semiannual">Nuovo servizio: semestrale</option>
                 <option value="annual">Nuovo servizio: annuale</option>
               </select>
-              <input type="date" name="purchaseDate" required />
 
               <select name="billingTypeOverride">
                 <option value="auto">Tipo fatturazione: auto da servizio</option>
@@ -672,9 +731,9 @@ app.get('/gestionale/clienti/:id', (req, res) => {
         </div>
 
         <div class="crm-tab-panel" data-panel="rinnovi">
-          <h2>Prossimi rinnovi</h2>
+          <h2>Prossimi abbonamenti in scadenza</h2>
           ${renderRenewalsTable(upcoming, store.services, store.customers, false)}
-          <h2 style="margin-top:16px">Storico rinnovi/pagamenti</h2>
+          <h2 style="margin-top:16px">Storico abbonamenti / pagamenti</h2>
           ${renderRenewalsTable(history, store.services, store.customers, false)}
         </div>
 
@@ -782,6 +841,8 @@ app.post('/gestionale/clienti/:id/assign', (req, res) => {
   const billingType = deriveBillingType(req.body.billingTypeOverride, service.billingType);
   const billingInterval = deriveBillingInterval(req.body.billingIntervalOverride, service.billingInterval);
   const renewalDate = billingType === 'subscription' ? computeRenewalDate(purchaseDate, billingInterval) : '';
+  const customPrice = Number(req.body.customPrice || 0);
+  const priceAtSale = customPrice > 0 ? customPrice : Number(service.price || 0);
 
   store.subscriptions.unshift({
     id: nextId(store.subscriptions),
@@ -795,7 +856,7 @@ app.post('/gestionale/clienti/:id/assign', (req, res) => {
     renewalDate,
     billingType,
     billingInterval,
-    priceAtSale: Number(service.price || 0),
+    priceAtSale,
     status: req.body.status || 'active',
     paymentStatus: 'pending',
     notes: (req.body.notes || '').trim(),
@@ -1422,7 +1483,10 @@ function importCrmCsvData(store, input) {
   if (input.replaceExisting) {
     store.customers = [];
     store.jobs = [];
+    store.subscriptions = [];
   }
+
+  const annualService = ensureAnnualManagementService(store);
 
   const customersByCrmCompanyId = new Map();
   const contactsByCrmContactId = new Map();
@@ -1612,9 +1676,78 @@ function importCrmCsvData(store, input) {
       Object.assign(job, payload);
     }
     jobsUpserted += 1;
+
+    if (payload.status === 'gestione_annuale') {
+      upsertAnnualSubscriptionFromDeal(store, annualService, customer, row, contact, crmDealId);
+    }
   }
 
   return { customersUpserted, contactsLinked, jobsUpserted };
+}
+
+function ensureAnnualManagementService(store) {
+  let service = store.services.find((s) => String(s.name || '').toLowerCase() === 'gestione annuale');
+  if (service) return service;
+
+  service = {
+    id: nextId(store.services),
+    name: 'Gestione annuale',
+    description: 'Servizio annuale ricorrente',
+    price: 0,
+    billingType: 'subscription',
+    billingInterval: 'annual',
+    active: true,
+    createdAt: new Date().toISOString()
+  };
+  store.services.unshift(service);
+  return service;
+}
+
+function upsertAnnualSubscriptionFromDeal(store, annualService, customer, row, contact, crmDealId) {
+  const purchaseDate = normalizeDate(row['Data di chiusura']) || normalizeDateTime(row['Ora creazione']).slice(0, 10) || new Date().toISOString().slice(0, 10);
+  const customPrice = normalizeMoney(row.Valore);
+  const priceAtSale = customPrice > 0 ? customPrice : Number(annualService.price || 0);
+  const dealContactName = String(row['Nome Contatto'] || contact?.fullName || `${customer.firstName || ''} ${customer.lastName || ''}`).trim();
+  const dealContactEmail = String(contact?.email || customer.email || '').trim().toLowerCase();
+
+  let sub = store.subscriptions.find((s) => String(s.crmDealId || '') === crmDealId);
+  if (!sub) {
+    sub = store.subscriptions.find((s) =>
+      Number(s.customerId || 0) === Number(customer.id) &&
+      Number(s.serviceId || 0) === Number(annualService.id) &&
+      String(s.purchaseDate || '') === purchaseDate
+    );
+  }
+
+  const payload = {
+    customerId: customer.id,
+    wpUserId: customer.wpUserId || null,
+    customerName: dealContactName,
+    company: customer.company,
+    email: dealContactEmail,
+    serviceId: annualService.id,
+    purchaseDate,
+    renewalDate: computeRenewalDate(purchaseDate, 'annual'),
+    billingType: 'subscription',
+    billingInterval: 'annual',
+    priceAtSale,
+    status: 'active',
+    paymentStatus: 'pending',
+    notes: String(row.Descrizione || '').trim(),
+    lastReminderSent: '',
+    crmDealId,
+    updatedAt: normalizeDateTime(row['Ora modifica']) || new Date().toISOString()
+  };
+
+  if (!sub) {
+    store.subscriptions.unshift({
+      id: nextId(store.subscriptions),
+      ...payload,
+      createdAt: normalizeDateTime(row['Ora creazione']) || new Date().toISOString()
+    });
+  } else {
+    Object.assign(sub, payload);
+  }
 }
 
 function parseCsvObjects(filePath) {
