@@ -346,11 +346,13 @@ app.get('/gestionale/clienti', (req, res) => {
 });
 
 app.get('/gestionale/clienti/new', (req, res) => {
+  const returnTo = sanitizeManagerReturn(req.query.returnTo, '/gestionale/clienti');
   const body = `
     <h1>Nuovo cliente</h1>
     <section class="card">
       <h2>Anagrafica cliente e invito</h2>
       <form method="post" action="/gestionale/clienti/new" class="form-grid two-col">
+        <input type="hidden" name="returnTo" value="${esc(returnTo)}" />
         <input type="text" name="company" placeholder="Azienda" required />
         <input type="text" name="vat" placeholder="Partita IVA" />
         <input type="text" name="firstName" placeholder="Nome referente" required />
@@ -368,6 +370,7 @@ app.get('/gestionale/clienti/new', (req, res) => {
 });
 
 app.post('/gestionale/clienti/new', async (req, res) => {
+  const returnTo = sanitizeManagerReturn(req.body.returnTo, '/gestionale/clienti');
   const company = (req.body.company || '').trim();
   const firstName = (req.body.firstName || '').trim();
   const lastName = (req.body.lastName || '').trim();
@@ -375,12 +378,15 @@ app.post('/gestionale/clienti/new', async (req, res) => {
   const phone = (req.body.phone || '').trim();
 
   if (!company || !firstName || !lastName || !email || !phone) {
-    return res.redirect('/gestionale/clienti/new');
+    return res.redirect('/gestionale/clienti/new?returnTo=' + encodeURIComponent(returnTo));
   }
 
   const store = readStore();
   const existing = store.customers.find((c) => String(c.email || '').toLowerCase() === email);
   if (existing) {
+    if (returnTo === '/gestionale/lavori/new') {
+      return res.redirect(`/gestionale/lavori/new?customerId=${existing.id}&msg=cliente_esistente`);
+    }
     return res.redirect(`/gestionale/clienti/${existing.id}`);
   }
 
@@ -420,6 +426,9 @@ app.post('/gestionale/clienti/new', async (req, res) => {
   maybeSendInviteEmail(customer, invite, inviteUrl);
 
   writeStore(store);
+  if (returnTo === '/gestionale/lavori/new') {
+    return res.redirect(`/gestionale/lavori/new?customerId=${customerId}&msg=cliente_creato`);
+  }
   return res.redirect(`/gestionale/clienti/${customerId}`);
 });
 
@@ -677,42 +686,187 @@ app.get('/gestionale/lavori', (req, res) => {
 
 app.get('/gestionale/lavori/new', (req, res) => {
   const store = readStore();
-  const customerOptions = store.customers.map((c) => `<option value="${c.id}">${esc(c.company || `${c.firstName} ${c.lastName}`)} - ${esc(c.email)}</option>`).join('');
+  const selectedCustomerId = Number(req.query.customerId || 0);
+  const noticeType = (req.query.msg || '').toString();
+  const notice = noticeType === 'cliente_creato'
+    ? '<div class="notice success">Nuovo cliente creato e selezionato nel form.</div>'
+    : noticeType === 'cliente_esistente'
+      ? '<div class="notice">Cliente gia esistente trovato e selezionato.</div>'
+      : '';
+
+  const customersForUi = store.customers.map((c) => ({
+    id: Number(c.id),
+    company: c.company || '',
+    contactName: `${c.firstName || ''} ${c.lastName || ''}`.trim(),
+    email: c.email || '',
+    phone: c.phone || ''
+  }));
+  const customerOptions = store.customers
+    .map((c) => {
+      const selected = Number(c.id) === selectedCustomerId ? 'selected' : '';
+      return `<option value="${c.id}" ${selected}>${esc(c.company || `${c.firstName} ${c.lastName}`)} - ${esc(c.email)}</option>`;
+    })
+    .join('');
   const serviceOptions = store.services.map((s) => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
+  const customerJson = JSON.stringify(customersForUi)
+    .replace(/</g, '\\u003c')
+    .replace(/>/g, '\\u003e')
+    .replace(/&/g, '\\u0026');
   const body = `
-    <h1>Nuova commessa</h1>
+    <h1>Crea Affare</h1>
+    ${notice}
     <section class="card">
-      <form method="post" action="/gestionale/lavori/new" class="form-grid two-col">
-        <input type="text" name="title" placeholder="Titolo lavoro/commessa" required />
-        <select name="status" required>${JOB_STATUS_OPTIONS.map((s) => `<option value="${s}">${esc(labelJobStatus(s))}</option>`).join('')}</select>
+      <form method="post" action="/gestionale/lavori/new" class="form-grid">
+        <h2>Informazioni Affare</h2>
+        <div class="affare-grid">
+          <label for="title">Nome Affare</label>
+          <input id="title" type="text" name="title" placeholder="Nome affare" required />
 
-        <select name="customerId"><option value="">Seleziona cliente esistente</option>${customerOptions}</select>
-        <input type="text" name="newCustomerCompany" placeholder="Oppure nuova azienda" />
+          <label for="companySearch">Nome Societa</label>
+          <div>
+            <input id="companySearch" type="text" placeholder="Cerca azienda nel menu a tendina" />
+            <select id="customerId" name="customerId" required>
+              <option value="">Seleziona azienda</option>
+              ${customerOptions}
+              <option value="__new__">+ Aggiungi nuova azienda e contatto</option>
+            </select>
+            <details id="inlineCustomerCreate" class="inline-create">
+              <summary>+ Aggiungi Azienda e Contatto</summary>
+              <div class="two-col form-grid">
+                <input type="text" name="newCustomerCompany" placeholder="Azienda" />
+                <input type="text" name="newCustomerPhone" placeholder="Telefono contatto" />
+                <input type="text" name="newCustomerFirstName" placeholder="Nome contatto" />
+                <input type="text" name="newCustomerLastName" placeholder="Cognome contatto" />
+                <input type="email" name="newCustomerEmail" placeholder="Email contatto" />
+                <div class="row-between" style="align-items:center">
+                  <span class="muted">Oppure crea da pagina dedicata:</span>
+                  <a class="btn-link" href="/gestionale/clienti/new?returnTo=/gestionale/lavori/new">Aggiungi cliente</a>
+                </div>
+              </div>
+            </details>
+          </div>
 
-        <input type="text" name="newCustomerFirstName" placeholder="Nuovo cliente: nome referente" />
-        <input type="text" name="newCustomerLastName" placeholder="Nuovo cliente: cognome referente" />
+          <label for="contactName">Nome Contatto</label>
+          <div>
+            <input id="contactName" type="text" name="contactName" placeholder="Nome e cognome contatto" />
+            <input id="contactEmail" type="email" name="contactEmail" placeholder="Email contatto" />
+          </div>
 
-        <input type="email" name="newCustomerEmail" placeholder="Nuovo cliente: email" />
-        <input type="text" name="newCustomerPhone" placeholder="Nuovo cliente: telefono" />
+          <label for="secondaryContacts">Contatti secondario</label>
+          <input id="secondaryContacts" type="text" name="secondaryContacts" placeholder="Cerca o inserisci contatti secondari" />
 
-        <select name="serviceId"><option value="">Servizio collegato (opzionale)</option>${serviceOptions}</select>
-        <input type="date" name="dueDate" />
+          <label for="pipelineName">Pipeline secondaria & Fase</label>
+          <div class="two-col" style="display:grid;gap:10px">
+            <select id="pipelineName" name="pipelineName">
+              <option value="Pipeline di vendita standard">Pipeline di vendita standard</option>
+              <option value="Pipeline annuale">Pipeline annuale</option>
+              <option value="Pipeline tecnico-operativa">Pipeline tecnico-operativa</option>
+            </select>
+            <select name="status">
+              ${JOB_STATUS_OPTIONS.map((s) => `<option value="${s}">${esc(labelJobStatus(s))}</option>`).join('')}
+            </select>
+          </div>
 
-        <input type="number" name="amount" step="0.01" min="0" placeholder="Importo previsto" />
-        <textarea name="notes" rows="3" placeholder="Note richiesta cliente"></textarea>
+          <label for="amount">Valore</label>
+          <input id="amount" type="number" name="amount" step="0.01" min="0" placeholder="0.00" />
 
-        <button type="submit">Crea commessa</button>
+          <label for="dueDate">Data di chiusura</label>
+          <input id="dueDate" type="date" name="dueDate" />
+
+          <label for="description">Descrizione</label>
+          <textarea id="description" name="description" rows="3" placeholder="Alcune osservazioni su affare"></textarea>
+        </div>
+
+        <h2>Informazioni addizionali</h2>
+        <div class="affare-grid">
+          <label for="downPayment">Anticipo versato</label>
+          <input id="downPayment" type="number" name="downPayment" step="0.01" min="0" placeholder="0.00" />
+
+          <label for="remainingBalance">Saldo mancante</label>
+          <input id="remainingBalance" type="number" name="remainingBalance" step="0.01" min="0" placeholder="0.00" />
+
+          <label for="annualDueDate">Scadenza gestione annuale</label>
+          <input id="annualDueDate" type="date" name="annualDueDate" />
+        </div>
+
+        <h2>Prodotti associato</h2>
+        <div class="affare-grid">
+          <label for="productName">Prodotto</label>
+          <input id="productName" type="text" name="productName" placeholder="Cerca Prodotto" />
+
+          <label for="productPrice">Prezzo listino (€)</label>
+          <input id="productPrice" type="number" name="productPrice" step="0.01" min="0" placeholder="0.00" />
+
+          <label for="productQty">Quantita</label>
+          <input id="productQty" type="number" name="productQty" step="1" min="1" value="1" />
+
+          <label for="productDiscount">Sconto (%)</label>
+          <input id="productDiscount" type="number" name="productDiscount" step="0.01" min="0" max="100" value="0" />
+
+          <label for="productTotal">Totale (€)</label>
+          <input id="productTotal" type="number" name="productTotal" step="0.01" min="0" placeholder="Calcolato o manuale" />
+        </div>
+
+        <div class="row-between">
+          <select name="serviceId"><option value="">Servizio collegato (opzionale)</option>${serviceOptions}</select>
+          <button type="submit">Crea Affare</button>
+        </div>
       </form>
     </section>
+    <script>
+      (function () {
+        const data = ${customerJson};
+        const select = document.getElementById('customerId');
+        const search = document.getElementById('companySearch');
+        const inlineCreate = document.getElementById('inlineCustomerCreate');
+        const contactName = document.getElementById('contactName');
+        const contactEmail = document.getElementById('contactEmail');
+        const selectedId = ${selectedCustomerId || 0};
+
+        function syncContactFromCustomer() {
+          const val = select.value;
+          const customer = data.find((x) => String(x.id) === String(val));
+          if (!customer) return;
+          if (!contactName.value) contactName.value = customer.contactName || '';
+          if (!contactEmail.value) contactEmail.value = customer.email || '';
+        }
+
+        function applySearch() {
+          const query = (search.value || '').trim().toLowerCase();
+          Array.from(select.options).forEach((opt) => {
+            if (!opt.value || opt.value === '__new__') return;
+            const visible = !query || opt.textContent.toLowerCase().includes(query);
+            opt.hidden = !visible;
+          });
+        }
+
+        if (selectedId) {
+          select.value = String(selectedId);
+          syncContactFromCustomer();
+        }
+
+        select.addEventListener('change', function () {
+          if (this.value === '__new__') {
+            inlineCreate.setAttribute('open', 'open');
+            return;
+          }
+          inlineCreate.removeAttribute('open');
+          syncContactFromCustomer();
+        });
+
+        search.addEventListener('input', applySearch);
+      })();
+    </script>
   `;
   res.send(renderAppLayout('Gestionale - Nuova Commessa', body, req.user, true));
 });
 
 app.post('/gestionale/lavori/new', (req, res) => {
   const store = readStore();
-  let customerId = Number(req.body.customerId || 0);
+  const customerIdRaw = (req.body.customerId || '').toString().trim();
+  let customerId = Number(customerIdRaw || 0);
 
-  if (!customerId) {
+  if (customerIdRaw === '__new__' || !customerId) {
     const company = (req.body.newCustomerCompany || '').trim();
     const firstName = (req.body.newCustomerFirstName || '').trim();
     const lastName = (req.body.newCustomerLastName || '').trim();
@@ -749,6 +903,7 @@ app.post('/gestionale/lavori/new', (req, res) => {
 
   const title = (req.body.title || '').trim();
   const status = normalizeJobStatus(req.body.status);
+  const description = (req.body.description || '').trim();
   if (!title || !customerId) {
     return res.redirect('/gestionale/lavori/new');
   }
@@ -758,7 +913,20 @@ app.post('/gestionale/lavori/new', (req, res) => {
     title,
     customerId,
     serviceId: Number(req.body.serviceId || 0) || null,
-    notes: (req.body.notes || '').trim(),
+    notes: description,
+    description,
+    contactName: (req.body.contactName || '').trim(),
+    contactEmail: (req.body.contactEmail || '').trim(),
+    secondaryContacts: (req.body.secondaryContacts || '').trim(),
+    pipelineName: (req.body.pipelineName || '').trim(),
+    downPayment: Number(req.body.downPayment || 0),
+    remainingBalance: Number(req.body.remainingBalance || 0),
+    annualDueDate: (req.body.annualDueDate || '').trim(),
+    productName: (req.body.productName || '').trim(),
+    productPrice: Number(req.body.productPrice || 0),
+    productQty: Number(req.body.productQty || 0),
+    productDiscount: Number(req.body.productDiscount || 0),
+    productTotal: Number(req.body.productTotal || 0),
     dueDate: (req.body.dueDate || '').trim(),
     amount: Number(req.body.amount || 0),
     status,
@@ -895,6 +1063,12 @@ function sanitizeNext(next) {
   if (typeof next !== 'string') return '/areapersonale';
   if (next.startsWith('/gestionale') || next.startsWith('/areapersonale')) return next;
   return '/areapersonale';
+}
+
+function sanitizeManagerReturn(next, fallback = '/gestionale/clienti') {
+  if (typeof next !== 'string') return fallback;
+  if (next === '/gestionale/lavori/new' || next === '/gestionale/clienti' || next.startsWith('/gestionale/clienti/')) return next;
+  return fallback;
 }
 
 function ensureStore() {
@@ -1424,21 +1598,26 @@ function renderPublicPage(title, body) {
 }
 
 function renderAppLayout(title, body, user, isAdmin) {
-  const adminLinks = isAdmin
-    ? `
-      <a href="/gestionale">Dashboard</a>
-      <a href="/gestionale/clienti">Clienti</a>
-      <a href="/gestionale/lavori">Lavori</a>
-      <a href="/gestionale/servizi">Servizi</a>
-      <a href="/gestionale/rinnovi">Rinnovi</a>
-      <a href="/gestionale/ticket">Ticket</a>
-    `
-    : '';
-
   const userLinks = `
     <a href="/areapersonale">Area personale</a>
     <a href="/logout">Logout</a>
   `;
+  const topLinks = isAdmin ? '' : userLinks;
+  const adminSidebar = isAdmin
+    ? `
+      <aside class="side-nav" aria-label="Navigazione gestionale">
+        <h3>Navigazione</h3>
+        <a data-path="/gestionale" href="/gestionale">Dashboard</a>
+        <a data-path="/gestionale/lavori" href="/gestionale/lavori">Lavori</a>
+        <a data-path="/gestionale/servizi" href="/gestionale/servizi">Servizi</a>
+        <a data-path="/gestionale/rinnovi" href="/gestionale/rinnovi">Rinnovi</a>
+        <a data-path="/gestionale/clienti" href="/gestionale/clienti">Clienti</a>
+        <a data-path="/gestionale/ticket" href="/gestionale/ticket">Ticket</a>
+        <a data-path="/areapersonale" href="/areapersonale">Area personale</a>
+        <a data-path="/logout" href="/logout">Logout</a>
+      </aside>
+    `
+    : '';
 
   return `<!doctype html>
   <html lang="it">
@@ -1449,18 +1628,28 @@ function renderAppLayout(title, body, user, isAdmin) {
     ${baseStyles()}
   </head>
   <body>
-    <div class="shell">
+    <div class="shell app-shell">
       <header class="top">
         <div>
           <strong>Easy Digital Agency - Gestionale</strong>
           <div class="muted">Utente: ${esc(user.display_name || user.email)} (${esc((user.roles || []).join(', '))})</div>
         </div>
-        <nav class="nav">${adminLinks}${userLinks}</nav>
+        <nav class="nav">${topLinks}</nav>
       </header>
-      <main>${body}</main>
+      <div class="app-body ${isAdmin ? 'has-sidebar' : ''}">
+        <main class="app-main">${body}</main>
+        ${adminSidebar}
+      </div>
     </div>
     <script>
       (function () {
+        const currentPath = window.location.pathname || '';
+        document.querySelectorAll('.side-nav a[data-path]').forEach((a) => {
+          const path = a.getAttribute('data-path') || '';
+          const exact = path === '/gestionale' ? currentPath === '/gestionale' : currentPath.startsWith(path);
+          if (exact) a.classList.add('is-active');
+        });
+
         document.querySelectorAll('.copy-btn[data-copy]').forEach((btn) => {
           btn.addEventListener('click', async () => {
             const value = btn.getAttribute('data-copy') || '';
@@ -1484,12 +1673,20 @@ function baseStyles() {
     :root { --g:#3dae63; --txt:#0f172a; --muted:#64748b; --line:#dbe5dd; --bg:#f3f6f4; }
     * { box-sizing:border-box; }
     body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial; color:var(--txt); background:var(--bg); }
-    .shell { max-width:1280px; margin:0 auto; padding:22px 16px 40px; }
+    .shell { max-width:1440px; margin:0 auto; padding:22px 16px 40px; }
+    .app-body { display:block; }
+    .app-body.has-sidebar { display:grid; grid-template-columns:minmax(0,1fr) 250px; gap:14px; align-items:start; }
+    .app-main { min-width:0; }
     .top { display:flex; justify-content:space-between; gap:14px; align-items:flex-start; background:#fff; border:1px solid var(--line); border-radius:12px; padding:14px; margin-bottom:16px; }
     .muted { color:var(--muted); font-size:.88rem; margin-top:4px; }
     .nav { display:flex; gap:8px; flex-wrap:wrap; }
     .nav a, .btn-link { text-decoration:none; border:1px solid var(--line); background:#fff; color:#111; padding:7px 10px; border-radius:8px; font-size:.9rem; display:inline-block; }
     .nav a:hover, .btn-link:hover { border-color:var(--g); color:var(--g); }
+    .side-nav { background:#fff; border:1px solid var(--line); border-radius:12px; padding:10px; position:sticky; top:16px; display:grid; gap:8px; }
+    .side-nav h3 { margin:6px 4px 4px; font-size:1rem; }
+    .side-nav a { text-decoration:none; border:1px solid var(--line); border-radius:8px; color:#1e293b; padding:8px 10px; font-size:.92rem; }
+    .side-nav a:hover { border-color:#3dae63; color:#166534; }
+    .side-nav a.is-active { border-color:#2f9f57; background:#e9f8ef; color:#166534; font-weight:600; }
     h1 { margin:4px 0 12px; font-size:1.65rem; }
     h2 { margin:0 0 10px; font-size:1.2rem; }
     .card { background:#fff; border:1px solid var(--line); border-radius:12px; padding:14px; margin-bottom:14px; }
@@ -1533,6 +1730,11 @@ function baseStyles() {
     .crm-notes-list { margin-top:12px; display:grid; gap:8px; }
     .crm-note { border:1px solid var(--line); border-radius:8px; padding:10px; background:#f8fbf9; }
     .status-badge { border:1px solid #bbf7d0; color:#166534; background:#e9f8ef; border-radius:999px; padding:3px 8px; font-size:.82rem; }
-    @media (max-width:900px){ .top {flex-direction:column;} .two-col { grid-template-columns:1fr; } .filter-grid { grid-template-columns:1fr; } .row-between { flex-direction:column; align-items:flex-start; } .crm-layout { grid-template-columns:1fr; } .crm-steps { min-width:unset; flex-direction:column; align-items:flex-start; } }
+    .affare-grid { display:grid; gap:10px; grid-template-columns: 180px minmax(0, 1fr); align-items:center; }
+    .inline-create { margin-top:8px; border:1px solid #bbf7d0; border-radius:8px; padding:8px 10px; background:#f0fdf4; }
+    .inline-create summary { cursor:pointer; color:#166534; font-weight:600; }
+    .notice { border:1px solid #cbd5e1; border-radius:8px; background:#f8fafc; color:#0f172a; padding:10px 12px; margin-bottom:10px; }
+    .notice.success { border-color:#86efac; background:#f0fdf4; color:#166534; }
+    @media (max-width:900px){ .top {flex-direction:column;} .two-col { grid-template-columns:1fr; } .filter-grid { grid-template-columns:1fr; } .row-between { flex-direction:column; align-items:flex-start; } .crm-layout { grid-template-columns:1fr; } .crm-steps { min-width:unset; flex-direction:column; align-items:flex-start; } .app-body.has-sidebar { grid-template-columns:1fr; } .side-nav { position:static; } .affare-grid { grid-template-columns:1fr; } }
   </style>`;
 }
