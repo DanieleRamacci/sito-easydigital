@@ -24,7 +24,15 @@ const SMTP_USER = process.env.SMTP_USER || '';
 const SMTP_PASS = process.env.SMTP_PASS || '';
 const SMTP_FROM = process.env.SMTP_FROM || '';
 
-const JOB_STATUS_OPTIONS = ['aperta', 'call_fissata', 'preventivo_inviato', 'attiva', 'chiusa_acquisita', 'chiusa_persa'];
+const JOB_STATUS_OPTIONS = [
+  'qualificazione_preventivo',
+  'scrittura_preventivo',
+  'in_lavorazione',
+  'in_attesa_pagamento',
+  'gestione_annuale',
+  'chiusa_acquisita',
+  'chiusa_persa'
+];
 
 ensureStore();
 
@@ -317,6 +325,61 @@ app.post('/gestionale/servizi/new', (req, res) => {
   res.redirect('/gestionale/servizi');
 });
 
+app.get('/gestionale/importazioni', (req, res) => {
+  const companiesPath = (req.query.companiesPath || '').toString().trim();
+  const contactsPath = (req.query.contactsPath || '').toString().trim();
+  const pipelinesPath = (req.query.pipelinesPath || '').toString().trim();
+  const msg = (req.query.msg || '').toString().trim();
+  const body = `
+    <h1>Importazioni CRM</h1>
+    ${msg ? `<div class="notice">${esc(msg)}</div>` : ''}
+    <section class="card">
+      <h2>Importa Aziende, Contatti e Lavori da CSV</h2>
+      <p class="muted">I file vengono collegati tramite ID sorgente (azienda/contatto/affare). Le fasi pipeline vengono mappate sugli stati del gestionale.</p>
+      <form method="post" action="/gestionale/importazioni/run" class="form-grid">
+        <input type="text" name="companiesPath" value="${esc(companiesPath)}" placeholder="/percorso/Companies_....csv" required />
+        <input type="text" name="contactsPath" value="${esc(contactsPath)}" placeholder="/percorso/Contacts_....csv" required />
+        <input type="text" name="pipelinesPath" value="${esc(pipelinesPath)}" placeholder="/percorso/Pipelines_....csv" required />
+        <label style="display:flex;align-items:center;gap:8px">
+          <input type="checkbox" name="replaceExisting" value="1" />
+          <span>Sostituisci tutti i clienti e lavori attuali prima dell'import</span>
+        </label>
+        <button type="submit">Esegui importazione</button>
+      </form>
+    </section>
+  `;
+  res.send(renderAppLayout('Gestionale - Importazioni', body, req.user, true));
+});
+
+app.post('/gestionale/importazioni/run', (req, res) => {
+  const companiesPath = (req.body.companiesPath || '').toString().trim();
+  const contactsPath = (req.body.contactsPath || '').toString().trim();
+  const pipelinesPath = (req.body.pipelinesPath || '').toString().trim();
+  const replaceExisting = req.body.replaceExisting === '1';
+
+  try {
+    const store = readStore();
+    const summary = importCrmCsvData(store, {
+      companiesPath,
+      contactsPath,
+      pipelinesPath,
+      replaceExisting
+    });
+    writeStore(store);
+    const msg = `Import completato. Aziende create/aggiornate: ${summary.customersUpserted}. Contatti collegati: ${summary.contactsLinked}. Lavori creati/aggiornati: ${summary.jobsUpserted}.`;
+    return res.redirect('/gestionale/importazioni?msg=' + encodeURIComponent(msg));
+  } catch (err) {
+    const msg = `Errore importazione: ${err.message || 'errore sconosciuto'}`;
+    const qs = new URLSearchParams({
+      msg,
+      companiesPath,
+      contactsPath,
+      pipelinesPath
+    });
+    return res.redirect('/gestionale/importazioni?' + qs.toString());
+  }
+});
+
 app.get('/gestionale/clienti', (req, res) => {
   const store = readStore();
   const q = (req.query.q || '').toString().trim();
@@ -457,9 +520,19 @@ app.get('/gestionale/clienti/:id', (req, res) => {
   const invite = store.invites.find((i) => i.customerId === id && i.status === 'pending');
   const inviteLink = invite ? `${WP_BASE_URL}/areapersonale/invito?token=${invite.token}` : '';
   const latestJob = [...customerJobs].sort((a, b) => String(b.updatedAt || b.createdAt || '').localeCompare(String(a.updatedAt || a.createdAt || '')))[0];
-  const pipelineStage = latestJob ? normalizeJobStatus(latestJob.status) : 'aperta';
+  const pipelineStage = latestJob ? normalizeJobStatus(latestJob.status) : 'qualificazione_preventivo';
   const totalValue = customerSubs.reduce((sum, s) => sum + Number(s.priceAtSale || 0), 0);
   const customerNotes = Array.isArray(customer.notes) ? [...customer.notes].sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || ''))) : [];
+  const contacts = Array.isArray(customer.crmContacts) ? customer.crmContacts : [];
+  const contactsList = contacts.length
+    ? contacts.map((c) => `<li class="contact-item">
+        <span>${esc(c.name || '-')} ${c.email ? `(${esc(c.email)})` : ''}</span>
+        <form method="post" action="/gestionale/clienti/${id}/contacts/delete" onsubmit="return confirm('Eliminare questo contatto?');">
+          <input type="hidden" name="contactId" value="${esc(c.id || '')}" />
+          <button type="submit" class="danger-btn ghost">Elimina</button>
+        </form>
+      </li>`).join('')
+    : '<li class="muted">Nessun contatto secondario.</li>';
 
   const body = `
     <section class="crm-header card">
@@ -471,12 +544,32 @@ app.get('/gestionale/clienti/:id', (req, res) => {
       <div class="crm-actions">
         <a class="btn-link" href="mailto:${esc(customer.email)}">Invia e-mail</a>
         ${inviteLink ? `<a class="btn-link" href="${esc(inviteLink)}" target="_blank" rel="noopener">Link invito</a>` : ''}
+        <form method="post" action="/gestionale/clienti/${id}/delete" onsubmit="return confirm('Eliminare azienda e tutti i dati collegati (lavori, rinnovi, ticket, inviti)?');">
+          <button type="submit" class="danger-btn">Elimina azienda</button>
+        </form>
       </div>
     </section>
 
     <section class="card crm-pipeline">
       ${renderPipeline(pipelineStage)}
     </section>
+    ${latestJob ? `
+      <section class="card">
+        <h2>Avanzamento rapido pipeline</h2>
+        <form method="post" action="/gestionale/lavori/${latestJob.id}/status" class="row-between">
+          <div>
+            <strong>${esc(latestJob.title)}</strong>
+            <div class="muted">Stato attuale: ${esc(labelJobStatus(latestJob.status))}</div>
+          </div>
+          <div class="inline-actions">
+            <select name="status">
+              ${JOB_STATUS_OPTIONS.map((s) => `<option value="${s}" ${latestJob.status === s ? 'selected' : ''}>${esc(labelJobStatus(s))}</option>`).join('')}
+            </select>
+            <button type="submit">Aggiorna fase</button>
+          </div>
+        </form>
+      </section>
+    ` : ''}
 
     <section class="crm-layout">
       <aside class="card crm-left">
@@ -484,6 +577,12 @@ app.get('/gestionale/clienti/:id', (req, res) => {
         <p><strong>${esc(`${customer.firstName} ${customer.lastName}`.trim())}</strong></p>
         <p>${esc(customer.email)}</p>
         <p>${esc(customer.phone || '-')}</p>
+        <form method="post" action="/gestionale/clienti/${id}/contacts/delete" onsubmit="return confirm('Eliminare il contatto principale?');">
+          <input type="hidden" name="contactId" value="__primary__" />
+          <button type="submit" class="danger-btn ghost">Elimina contatto principale</button>
+        </form>
+        <h2>Contatti associati</h2>
+        <ul class="contact-list">${contactsList}</ul>
         <h2>Societa correlata</h2>
         <p><strong>${esc(customer.company || '-')}</strong></p>
         <p>P.IVA: ${esc(customer.vat || '-')}</p>
@@ -615,6 +714,46 @@ app.post('/gestionale/clienti/:id/note', (req, res) => {
   customer.updatedAt = new Date().toISOString();
   writeStore(store);
   res.redirect(`/gestionale/clienti/${customerId}`);
+});
+
+app.post('/gestionale/clienti/:id/contacts/delete', (req, res) => {
+  const store = readStore();
+  const customerId = Number(req.params.id || 0);
+  const contactId = (req.body.contactId || '').toString().trim();
+  const customer = store.customers.find((c) => Number(c.id) === customerId);
+  if (!customer || !contactId) return res.redirect(`/gestionale/clienti/${customerId}`);
+
+  if (contactId === '__primary__') {
+    customer.firstName = '';
+    customer.lastName = '';
+    customer.email = '';
+    customer.phone = '';
+    customer.crmPrimaryContactId = '';
+  } else {
+    if (!Array.isArray(customer.crmContacts)) customer.crmContacts = [];
+    customer.crmContacts = customer.crmContacts.filter((c) => String(c.id || '') !== contactId);
+    if (String(customer.crmPrimaryContactId || '') === contactId) customer.crmPrimaryContactId = '';
+  }
+
+  customer.updatedAt = new Date().toISOString();
+  writeStore(store);
+  return res.redirect(`/gestionale/clienti/${customerId}`);
+});
+
+app.post('/gestionale/clienti/:id/delete', (req, res) => {
+  const store = readStore();
+  const customerId = Number(req.params.id || 0);
+  const exists = store.customers.some((c) => Number(c.id) === customerId);
+  if (!exists) return res.redirect('/gestionale/clienti');
+
+  store.customers = store.customers.filter((c) => Number(c.id) !== customerId);
+  store.jobs = store.jobs.filter((j) => Number(j.customerId || 0) !== customerId);
+  store.subscriptions = store.subscriptions.filter((s) => Number(s.customerId || 0) !== customerId);
+  store.tickets = store.tickets.filter((t) => Number(t.customerId || 0) !== customerId);
+  store.invites = store.invites.filter((i) => Number(i.customerId || 0) !== customerId);
+
+  writeStore(store);
+  return res.redirect('/gestionale/clienti');
 });
 
 app.post('/gestionale/clienti/:id/assign', (req, res) => {
@@ -948,7 +1087,15 @@ app.post('/gestionale/lavori/:id/status', (req, res) => {
     job.updatedAt = new Date().toISOString();
     writeStore(store);
   }
-  res.redirect('/gestionale/lavori');
+  res.redirect(req.get('referer') || '/gestionale/lavori');
+});
+
+app.post('/gestionale/lavori/:id/delete', (req, res) => {
+  const store = readStore();
+  const id = Number(req.params.id || 0);
+  store.jobs = store.jobs.filter((j) => Number(j.id) !== id);
+  writeStore(store);
+  res.redirect(req.get('referer') || '/gestionale/lavori');
 });
 
 app.get('/gestionale/rinnovi', (req, res) => {
@@ -1129,7 +1276,8 @@ function normalizeStore(store) {
   }
 
   for (const job of s.jobs) {
-    if (!job.status) job.status = 'aperta';
+    if (!job.status) job.status = 'qualificazione_preventivo';
+    job.status = normalizeJobStatus(job.status);
   }
 
   for (const customer of s.customers) {
@@ -1187,10 +1335,11 @@ function labelBilling(type, interval) {
 
 function labelJobStatus(v) {
   const map = {
-    aperta: 'Aperta',
-    call_fissata: 'Call fissata',
-    preventivo_inviato: 'Preventivo inviato',
-    attiva: 'Attiva',
+    qualificazione_preventivo: 'Qualificazione e preventivo',
+    scrittura_preventivo: 'Scrittura preventivo',
+    in_lavorazione: 'In lavorazione',
+    in_attesa_pagamento: 'In attesa di pagamento',
+    gestione_annuale: 'Gestione annuale',
     chiusa_acquisita: 'Chiusa e acquisita',
     chiusa_persa: 'Chiusa e persa'
   };
@@ -1198,8 +1347,15 @@ function labelJobStatus(v) {
 }
 
 function normalizeJobStatus(v) {
-  const value = String(v || 'aperta');
-  return JOB_STATUS_OPTIONS.includes(value) ? value : 'aperta';
+  const legacyMap = {
+    aperta: 'qualificazione_preventivo',
+    call_fissata: 'qualificazione_preventivo',
+    preventivo_inviato: 'scrittura_preventivo',
+    attiva: 'in_lavorazione'
+  };
+  const value = String(v || 'qualificazione_preventivo');
+  if (legacyMap[value]) return legacyMap[value];
+  return JOB_STATUS_OPTIONS.includes(value) ? value : 'qualificazione_preventivo';
 }
 
 function filterCustomers(customers, q, status) {
@@ -1233,6 +1389,320 @@ function filterRenewals(rows, services, q, payment) {
     const blob = `${r.company || ''} ${r.customerName || ''} ${r.email || ''} ${service?.name || ''}`.toLowerCase();
     return blob.includes(query);
   });
+}
+
+function importCrmCsvData(store, input) {
+  const companiesPath = String(input.companiesPath || '').trim();
+  const contactsPath = String(input.contactsPath || '').trim();
+  const pipelinesPath = String(input.pipelinesPath || '').trim();
+  if (!companiesPath || !contactsPath || !pipelinesPath) {
+    throw new Error('Percorsi CSV mancanti');
+  }
+
+  const companiesRows = parseCsvObjects(companiesPath);
+  const contactsRows = parseCsvObjects(contactsPath);
+  const pipelinesRows = parseCsvObjects(pipelinesPath);
+
+  if (input.replaceExisting) {
+    store.customers = [];
+    store.jobs = [];
+  }
+
+  const customersByCrmCompanyId = new Map();
+  const contactsByCrmContactId = new Map();
+  const contactsByCrmCompanyId = new Map();
+
+  for (const c of contactsRows) {
+    const contactId = String(c['Contact Id'] || '').trim();
+    const companyId = String(c['Nome Società.id'] || '').trim();
+    const contact = {
+      contactId,
+      companyId,
+      firstName: String(c.Nome || '').trim(),
+      lastName: String(c.Cognome || '').trim(),
+      fullName: String(c['Contact Name'] || `${c.Nome || ''} ${c.Cognome || ''}`).trim(),
+      email: String(c['E-mail'] || '').trim().toLowerCase(),
+      mobile: String(c.Cellulare || '').trim(),
+      phone: String(c.Telefono || '').trim()
+    };
+    if (contactId) contactsByCrmContactId.set(contactId, contact);
+    if (companyId) {
+      if (!contactsByCrmCompanyId.has(companyId)) contactsByCrmCompanyId.set(companyId, []);
+      contactsByCrmCompanyId.get(companyId).push(contact);
+    }
+  }
+
+  let customersUpserted = 0;
+  let contactsLinked = 0;
+  let jobsUpserted = 0;
+
+  for (const row of companiesRows) {
+    const crmCompanyId = String(row['Company Id'] || '').trim();
+    const company = String(row['Nome Società'] || '').trim();
+    const contactsForCompany = contactsByCrmCompanyId.get(crmCompanyId) || [];
+    const primaryContact = contactsForCompany[0] || null;
+    const email = String((primaryContact?.email || row['Email Contatto'] || '')).trim().toLowerCase();
+    const phone = String((primaryContact?.mobile || primaryContact?.phone || row.Telefono || '')).trim();
+
+    let customer = store.customers.find((c) => String(c.crmCompanyId || '') === crmCompanyId);
+    if (!customer && email) {
+      customer = store.customers.find((c) => String(c.email || '').toLowerCase() === email);
+    }
+    if (!customer && company) {
+      customer = store.customers.find((c) => String(c.company || '').toLowerCase() === company.toLowerCase());
+    }
+
+    const firstName = String(primaryContact?.firstName || '').trim();
+    const lastName = String(primaryContact?.lastName || '').trim();
+    const now = new Date().toISOString();
+    if (!customer) {
+      customer = {
+        id: nextId(store.customers),
+        company,
+        vat: String(row.PIVA || '').trim(),
+        firstName,
+        lastName,
+        email,
+        phone,
+        billingAddress: String(row['Via fatturazione'] || '').trim(),
+        pec: String(row.pec || '').trim(),
+        sdi: String(row.SDI || '').trim(),
+        status: 'lead',
+        wpUserId: null,
+        wpUsername: '',
+        crmCompanyId,
+        crmPrimaryContactId: primaryContact?.contactId || '',
+        crmContacts: contactsForCompany.map((x) => ({ id: x.contactId, name: x.fullName, email: x.email })),
+        createdAt: normalizeDateTime(row['Ora creazione']) || now,
+        updatedAt: normalizeDateTime(row['Ora modifica']) || now,
+        notes: []
+      };
+      store.customers.unshift(customer);
+    } else {
+      customer.company = company || customer.company;
+      customer.vat = String(row.PIVA || customer.vat || '').trim();
+      customer.firstName = firstName || customer.firstName;
+      customer.lastName = lastName || customer.lastName;
+      customer.email = email || customer.email;
+      customer.phone = phone || customer.phone;
+      customer.billingAddress = String(row['Via fatturazione'] || customer.billingAddress || '').trim();
+      customer.pec = String(row.pec || customer.pec || '').trim();
+      customer.sdi = String(row.SDI || customer.sdi || '').trim();
+      customer.crmCompanyId = crmCompanyId || customer.crmCompanyId || '';
+      customer.crmPrimaryContactId = primaryContact?.contactId || customer.crmPrimaryContactId || '';
+      customer.crmContacts = contactsForCompany.map((x) => ({ id: x.contactId, name: x.fullName, email: x.email }));
+      customer.updatedAt = normalizeDateTime(row['Ora modifica']) || now;
+      if (!Array.isArray(customer.notes)) customer.notes = [];
+    }
+    customersUpserted += 1;
+    contactsLinked += contactsForCompany.length;
+    if (crmCompanyId) customersByCrmCompanyId.set(crmCompanyId, customer);
+  }
+
+  for (const row of contactsRows) {
+    const crmContactId = String(row['Contact Id'] || '').trim();
+    const companyId = String(row['Nome Società.id'] || '').trim();
+    const linkedCustomer = companyId ? customersByCrmCompanyId.get(companyId) : null;
+    if (linkedCustomer && !Array.isArray(linkedCustomer.crmContacts)) linkedCustomer.crmContacts = [];
+    if (linkedCustomer && crmContactId && !linkedCustomer.crmContacts.find((x) => x.id === crmContactId)) {
+      linkedCustomer.crmContacts.push({
+        id: crmContactId,
+        name: String(row['Contact Name'] || `${row.Nome || ''} ${row.Cognome || ''}`).trim(),
+        email: String(row['E-mail'] || '').trim().toLowerCase()
+      });
+      contactsLinked += 1;
+    }
+  }
+
+  for (const row of pipelinesRows) {
+    const crmDealId = String(row['Affare Id'] || '').trim();
+    const crmCompanyId = String(row['Nome Società.id'] || '').trim();
+    const crmContactId = String(row['Nome Contatto.id'] || '').trim();
+    const contact = contactsByCrmContactId.get(crmContactId);
+
+    let customer = crmCompanyId ? customersByCrmCompanyId.get(crmCompanyId) : null;
+    if (!customer) {
+      const companyName = String(row['Nome Società'] || '').trim();
+      if (companyName) customer = store.customers.find((c) => String(c.company || '').toLowerCase() === companyName.toLowerCase()) || null;
+    }
+    if (!customer && contact?.email) {
+      customer = store.customers.find((c) => String(c.email || '').toLowerCase() === String(contact.email || '').toLowerCase()) || null;
+    }
+    if (!customer) {
+      const fullName = String(row['Nome Contatto'] || contact?.fullName || '').trim();
+      const [firstName, ...rest] = fullName.split(' ');
+      const lastName = rest.join(' ').trim();
+      customer = {
+        id: nextId(store.customers),
+        company: String(row['Nome Società'] || fullName || 'Cliente importato').trim(),
+        vat: '',
+        firstName: String(firstName || '').trim(),
+        lastName: String(lastName || '').trim(),
+        email: String((contact?.email || '')).trim().toLowerCase(),
+        phone: String((contact?.mobile || contact?.phone || '')).trim(),
+        billingAddress: '',
+        pec: '',
+        sdi: '',
+        status: 'lead',
+        wpUserId: null,
+        wpUsername: '',
+        crmCompanyId,
+        crmPrimaryContactId: crmContactId,
+        crmContacts: contact ? [{ id: contact.contactId, name: contact.fullName, email: contact.email }] : [],
+        createdAt: normalizeDateTime(row['Ora creazione']) || new Date().toISOString(),
+        updatedAt: normalizeDateTime(row['Ora modifica']) || new Date().toISOString(),
+        notes: []
+      };
+      store.customers.unshift(customer);
+      customersUpserted += 1;
+      if (crmCompanyId) customersByCrmCompanyId.set(crmCompanyId, customer);
+    }
+
+    let job = store.jobs.find((j) => String(j.crmDealId || '') === crmDealId);
+    const payload = {
+      title: String(row['Nome Affare'] || '').trim() || 'Affare importato',
+      customerId: customer.id,
+      serviceId: null,
+      notes: String(row.Descrizione || '').trim(),
+      description: String(row.Descrizione || '').trim(),
+      contactName: String(row['Nome Contatto'] || contact?.fullName || '').trim(),
+      contactEmail: String(contact?.email || customer.email || '').trim().toLowerCase(),
+      secondaryContacts: '',
+      pipelineName: String(row['Pipeline secondaria'] || row.Pipeline || '').trim(),
+      downPayment: normalizeMoney(row['Anticipo versato']),
+      remainingBalance: normalizeMoney(row['Saldo mancante']),
+      annualDueDate: normalizeDate(row['Scadenza gestione annuale']),
+      productName: '',
+      productPrice: 0,
+      productQty: 0,
+      productDiscount: 0,
+      productTotal: 0,
+      dueDate: normalizeDate(row['Data di chiusura']),
+      amount: normalizeMoney(row.Valore),
+      status: phaseToJobStatus(row.Fase),
+      crmDealId,
+      crmCompanyId,
+      crmContactId,
+      createdAt: normalizeDateTime(row['Ora creazione']) || new Date().toISOString(),
+      updatedAt: normalizeDateTime(row['Ora modifica']) || new Date().toISOString()
+    };
+
+    if (!job) {
+      store.jobs.unshift({
+        id: nextId(store.jobs),
+        ...payload
+      });
+    } else {
+      Object.assign(job, payload);
+    }
+    jobsUpserted += 1;
+  }
+
+  return { customersUpserted, contactsLinked, jobsUpserted };
+}
+
+function parseCsvObjects(filePath) {
+  if (!fs.existsSync(filePath)) throw new Error(`File non trovato: ${filePath}`);
+  const text = fs.readFileSync(filePath, 'utf8');
+  const rows = parseCsvRows(text);
+  if (!rows.length) return [];
+  const headers = rows[0].map((h) => String(h || '').trim());
+  return rows.slice(1).map((cells) => {
+    const obj = {};
+    for (let i = 0; i < headers.length; i += 1) {
+      obj[headers[i]] = String(cells[i] || '').trim();
+    }
+    return obj;
+  });
+}
+
+function parseCsvRows(input) {
+  const rows = [];
+  let row = [];
+  let cell = '';
+  let quoted = false;
+
+  for (let i = 0; i < input.length; i += 1) {
+    const ch = input[i];
+    const next = input[i + 1];
+
+    if (ch === '"') {
+      if (quoted && next === '"') {
+        cell += '"';
+        i += 1;
+      } else {
+        quoted = !quoted;
+      }
+      continue;
+    }
+
+    if (ch === ',' && !quoted) {
+      row.push(cell);
+      cell = '';
+      continue;
+    }
+
+    if ((ch === '\n' || ch === '\r') && !quoted) {
+      if (ch === '\r' && next === '\n') i += 1;
+      row.push(cell);
+      const hasValue = row.some((x) => String(x || '').trim() !== '');
+      if (hasValue) rows.push(row);
+      row = [];
+      cell = '';
+      continue;
+    }
+
+    cell += ch;
+  }
+
+  if (cell.length > 0 || row.length > 0) {
+    row.push(cell);
+    const hasValue = row.some((x) => String(x || '').trim() !== '');
+    if (hasValue) rows.push(row);
+  }
+
+  return rows;
+}
+
+function normalizeDate(v) {
+  const raw = String(v || '').trim();
+  if (!raw) return '';
+  const m = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (m) return raw;
+  const dt = new Date(raw);
+  if (Number.isNaN(dt.getTime())) return '';
+  return dt.toISOString().slice(0, 10);
+}
+
+function normalizeDateTime(v) {
+  const raw = String(v || '').trim();
+  if (!raw) return '';
+  const isoCandidate = raw.includes(' ') ? raw.replace(' ', 'T') : raw;
+  const dt = new Date(isoCandidate);
+  if (Number.isNaN(dt.getTime())) return '';
+  return dt.toISOString();
+}
+
+function normalizeMoney(v) {
+  const raw = String(v || '').trim();
+  if (!raw) return 0;
+  const normalized = raw.replace(/\./g, '').replace(',', '.').replace(/[^0-9.-]/g, '');
+  const n = Number(normalized);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function phaseToJobStatus(phase) {
+  const key = String(phase || '').trim().toLowerCase();
+  const map = {
+    'qualificazione e preventivo': 'qualificazione_preventivo',
+    'scrittura preventivo': 'scrittura_preventivo',
+    'in lavorazione': 'in_lavorazione',
+    'in attesa di pagamento': 'in_attesa_pagamento',
+    'gestione annuale': 'gestione_annuale',
+    'chiusa e acquisita': 'chiusa_acquisita',
+    'chiusa persa': 'chiusa_persa'
+  };
+  return map[key] || 'qualificazione_preventivo';
 }
 
 function renderServiceForm(action) {
@@ -1371,10 +1841,15 @@ function renderCustomersTable(store, customersOverride = null) {
       <td>${esc(c.vat || '-')}</td>
       <td>${esc(c.status)}</td>
       <td>${inviteLink ? `<button type="button" class="copy-btn" data-copy="${esc(inviteLink)}" title="Copia link invito">📋 Copia</button>` : '-'}</td>
+      <td>
+        <form method="post" action="/gestionale/clienti/${c.id}/delete" onsubmit="return confirm('Eliminare azienda e dati collegati?');">
+          <button type="submit" class="danger-btn ghost">Elimina</button>
+        </form>
+      </td>
     </tr>`;
   }).join('');
 
-  return `<table class="tbl"><thead><tr><th>Azienda</th><th>Referente</th><th>Email</th><th>Telefono</th><th>P.IVA</th><th>Stato</th><th>Link invito</th></tr></thead><tbody>${rows}</tbody></table>`;
+  return `<table class="tbl"><thead><tr><th>Azienda</th><th>Referente</th><th>Email</th><th>Telefono</th><th>P.IVA</th><th>Stato</th><th>Link invito</th><th>Azioni</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
 function renderSubscriptionsTableForAdmin(subs, services) {
@@ -1502,7 +1977,15 @@ function renderJobsTable(jobs, customers, services, includeActions) {
       const customerName = customer ? (customer.company || `${customer.firstName} ${customer.lastName}`) : 'N/A';
       const customerCell = customer ? `<a href="/gestionale/clienti/${customer.id}">${esc(customerName)}</a>` : esc(customerName);
       const actions = includeActions
-        ? `<form method="post" action="/gestionale/lavori/${j.id}/status" style="display:flex;gap:8px;align-items:center"><select name="status">${JOB_STATUS_OPTIONS.map((s) => `<option value="${s}" ${j.status === s ? 'selected' : ''}>${esc(labelJobStatus(s))}</option>`).join('')}</select><button type="submit">Aggiorna</button></form>`
+        ? `<div class="inline-actions">
+            <form method="post" action="/gestionale/lavori/${j.id}/status" style="display:flex;gap:8px;align-items:center">
+              <select name="status">${JOB_STATUS_OPTIONS.map((s) => `<option value="${s}" ${j.status === s ? 'selected' : ''}>${esc(labelJobStatus(s))}</option>`).join('')}</select>
+              <button type="submit">Aggiorna</button>
+            </form>
+            <form method="post" action="/gestionale/lavori/${j.id}/delete" onsubmit="return confirm('Eliminare questo lavoro?');">
+              <button type="submit" class="danger-btn ghost">Elimina</button>
+            </form>
+          </div>`
         : '-';
       return `<tr>
         <td>${esc(j.title)}</td>
@@ -1611,6 +2094,7 @@ function renderAppLayout(title, body, user, isAdmin) {
         <a data-path="/gestionale/lavori" href="/gestionale/lavori">Lavori</a>
         <a data-path="/gestionale/servizi" href="/gestionale/servizi">Servizi</a>
         <a data-path="/gestionale/rinnovi" href="/gestionale/rinnovi">Rinnovi</a>
+        <a data-path="/gestionale/importazioni" href="/gestionale/importazioni">Importazioni</a>
         <a data-path="/gestionale/clienti" href="/gestionale/clienti">Clienti</a>
         <a data-path="/gestionale/ticket" href="/gestionale/ticket">Ticket</a>
         <a data-path="/areapersonale" href="/areapersonale">Area personale</a>
@@ -1702,6 +2186,10 @@ function baseStyles() {
     input, select, textarea { width:100%; padding:10px 11px; border:1px solid var(--line); border-radius:8px; background:#fff; }
     button { border:1px solid #2f9f57; background:#3dae63; color:#fff; border-radius:8px; padding:10px 12px; cursor:pointer; font-weight:600; }
     button:hover { background:#2f9f57; }
+    .danger-btn { border:1px solid #dc2626; background:#ef4444; color:#fff; border-radius:8px; padding:8px 10px; cursor:pointer; font-weight:600; }
+    .danger-btn:hover { background:#dc2626; }
+    .danger-btn.ghost { background:#fff; color:#b91c1c; }
+    .danger-btn.ghost:hover { background:#fef2f2; }
     .copy-btn { border:1px solid var(--line); background:#fff; color:#111; border-radius:8px; padding:6px 9px; cursor:pointer; }
     .copy-btn:hover { border-color:var(--g); color:var(--g); }
     .tbl { width:100%; border-collapse:collapse; }
@@ -1730,6 +2218,9 @@ function baseStyles() {
     .crm-notes-list { margin-top:12px; display:grid; gap:8px; }
     .crm-note { border:1px solid var(--line); border-radius:8px; padding:10px; background:#f8fbf9; }
     .status-badge { border:1px solid #bbf7d0; color:#166534; background:#e9f8ef; border-radius:999px; padding:3px 8px; font-size:.82rem; }
+    .contact-list { list-style:none; padding:0; margin:8px 0 0; display:grid; gap:8px; }
+    .contact-item { border:1px solid var(--line); border-radius:8px; padding:8px; display:flex; justify-content:space-between; align-items:center; gap:8px; }
+    .inline-actions { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
     .affare-grid { display:grid; gap:10px; grid-template-columns: 180px minmax(0, 1fr); align-items:center; }
     .inline-create { margin-top:8px; border:1px solid #bbf7d0; border-radius:8px; padding:8px 10px; background:#f0fdf4; }
     .inline-create summary { cursor:pointer; color:#166534; font-weight:600; }
