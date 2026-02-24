@@ -248,39 +248,40 @@ app.use('/gestionale', requireAdmin);
 
 app.get('/gestionale', (req, res) => {
   const store = readStore();
-  const allJobs = sortJobsForWorklist(store.jobs);
+  const allRenewals = chronologicalRenewals(store);
+  const allJobs = [...store.jobs].sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
   const jobQ = (req.query.job_q || '').toString().trim();
   const jobStatus = (req.query.job_status || '').toString().trim();
   const renewQ = (req.query.renew_q || '').toString().trim();
   const renewPayment = (req.query.renew_payment || '').toString().trim();
-  const jobs = sortJobsForWorklist(filterJobs(allJobs, store.customers, store.services, jobQ, jobStatus));
-  const debts = filterDebtItems(buildDebtItems(store), renewQ, renewPayment, '');
+  const jobs = filterJobs(allJobs, store.customers, store.services, jobQ, jobStatus);
+  const renewals = filterRenewals(allRenewals, store.services, renewQ, renewPayment);
 
   const body = `
-    <h1>Dashboard Attivita</h1>
+    <h1>Gestionale - Dashboard</h1>
     <div class="kpi-grid">
       ${kpi('Clienti', String(store.customers.length))}
       ${kpi('Servizi catalogo', String(store.services.length))}
-      ${kpi('Attivita aperte', String(store.jobs.filter((j) => !isJobClosedStatus(j.status)).length))}
-      ${kpi('Debiti cliente aperti', String(debts.filter((d) => d.paymentStatus !== 'paid').length))}
+      ${kpi('Commesse aperte', String(store.jobs.filter((j) => !j.status.startsWith('chiusa_')).length))}
+      ${kpi('Rinnovi totali', String(allRenewals.length))}
       ${kpi('Ticket aperti', String(store.tickets.filter((t) => t.status !== 'closed').length))}
     </div>
 
     <section class="card">
       <div class="dash-tabs">
-        <button type="button" class="dash-tab-btn is-active" data-tab="dash-jobs">Attivita</button>
-        <button type="button" class="dash-tab-btn" data-tab="dash-renewals">Debiti clienti</button>
-        <a class="btn-link" href="/gestionale/lavori">Apri lista attivita</a>
-        <a class="btn-link" href="/gestionale/debiti">Apri debiti clienti</a>
+        <button type="button" class="dash-tab-btn is-active" data-tab="dash-jobs">Lavori / Commesse</button>
+        <button type="button" class="dash-tab-btn" data-tab="dash-renewals">Rinnovi</button>
+        <a class="btn-link" href="/gestionale/lavori">Apri tabella lavori</a>
+        <a class="btn-link" href="/gestionale/rinnovi">Apri tabella rinnovi</a>
       </div>
 
       <div class="dash-tab-panel is-active" data-panel="dash-jobs">
         <div class="row-between">
-          <h2>Attivita per stato</h2>
-          <a class="btn-link" href="/gestionale/lavori/new">+ Nuova attivita</a>
+          <h2>Pipeline lavori/commesse</h2>
+          <a class="btn-link" href="/gestionale/lavori/new">+ Nuova commessa</a>
         </div>
         <form method="get" action="/gestionale" class="filter-grid">
-          <input type="text" name="job_q" value="${esc(jobQ)}" placeholder="Cerca attivita/cliente/servizio" />
+          <input type="text" name="job_q" value="${esc(jobQ)}" placeholder="Cerca commessa/cliente/servizio" />
           <select name="job_status">
             <option value="">Tutti gli stati</option>
             ${JOB_STATUS_OPTIONS.map((s) => `<option value="${s}" ${jobStatus === s ? 'selected' : ''}>${esc(labelJobStatus(s))}</option>`).join('')}
@@ -289,11 +290,11 @@ app.get('/gestionale', (req, res) => {
           <input type="hidden" name="renew_payment" value="${esc(renewPayment)}" />
           <button type="submit">Filtra</button>
         </form>
-        <div style="margin-top:12px">${renderJobsByStatusBoard(jobs, store.customers, store.services)}</div>
+        <div style="margin-top:12px">${renderJobsTable(jobs, store.customers, store.services, true)}</div>
       </div>
 
       <div class="dash-tab-panel" data-panel="dash-renewals">
-        <h2>Debiti clienti per voce di costo</h2>
+        <h2>Rinnovi in ordine cronologico</h2>
         <form method="get" action="/gestionale" class="filter-grid">
           <input type="hidden" name="job_q" value="${esc(jobQ)}" />
           <input type="hidden" name="job_status" value="${esc(jobStatus)}" />
@@ -305,8 +306,7 @@ app.get('/gestionale', (req, res) => {
           </select>
           <button type="submit">Filtra</button>
         </form>
-        ${renderDebtsByCustomerTable(debts)}
-        <div style="margin-top:12px">${renderDebtItemsTable(debts, true)}</div>
+        ${renderRenewalsTable(renewals, store.services, store.customers, true)}
       </div>
     </section>
   `;
@@ -517,7 +517,6 @@ app.post('/gestionale/clienti/new', async (req, res) => {
 app.get('/gestionale/clienti/:id', (req, res) => {
   const store = readStore();
   const id = Number(req.params.id || 0);
-  const activityStatus = (req.query.activity_status || '').toString().trim();
   const customer = store.customers.find((c) => Number(c.id) === id);
   if (!customer) {
     return res.status(404).send(renderPublicPage('Cliente non trovato', '<p>Cliente non trovato.</p>'));
@@ -525,8 +524,7 @@ app.get('/gestionale/clienti/:id', (req, res) => {
 
   const customerSubs = store.subscriptions.filter((s) => Number(s.customerId) === id);
   const customerTickets = store.tickets.filter((t) => Number(t.customerId || 0) === id);
-  const customerJobs = sortJobsForWorklist(store.jobs.filter((j) => Number(j.customerId || 0) === id));
-  const filteredCustomerJobs = customerJobs.filter((j) => !activityStatus || j.status === activityStatus);
+  const customerJobs = store.jobs.filter((j) => Number(j.customerId || 0) === id);
   const workItems = buildCustomerWorkItems(customerJobs, customerSubs, store.services);
 
   const serviceOptions = store.services
@@ -642,7 +640,7 @@ app.get('/gestionale/clienti/:id', (req, res) => {
         <div class="crm-tabs">
           <button class="crm-tab-btn" data-tab="sequenza">Sequenza temporale</button>
           <button class="crm-tab-btn" data-tab="note">Note (${customerNotes.length})</button>
-          <button class="crm-tab-btn is-active" data-tab="lavori">Attivita</button>
+          <button class="crm-tab-btn is-active" data-tab="lavori">Lavori</button>
           <button class="crm-tab-btn" data-tab="pagamenti">Pagamenti</button>
           <button class="crm-tab-btn" data-tab="ticket">Ticket</button>
         </div>
@@ -707,19 +705,10 @@ app.get('/gestionale/clienti/:id', (req, res) => {
           </section>
           <section class="card">
             <div class="row-between">
-              <h2>Attivita del cliente</h2>
+              <h2>Richieste e servizi del cliente</h2>
               <a class="btn-link" href="/gestionale/lavori/new?customerId=${id}">+ Nuovo lavoro una tantum</a>
             </div>
-            <form method="get" action="/gestionale/clienti/${id}" class="filter-grid" style="margin-bottom:12px">
-              <input type="hidden" name="tab" value="lavori" />
-              <select name="activity_status">
-                <option value="">Stato: tutti (aperti e chiusi)</option>
-                ${JOB_STATUS_OPTIONS.map((s) => `<option value="${s}" ${activityStatus === s ? 'selected' : ''}>${esc(labelJobStatus(s))}</option>`).join('')}
-              </select>
-              <button type="submit">Filtra</button>
-            </form>
-            ${renderCustomerActivitiesTable(filteredCustomerJobs, customerSubs, store.services)}
-            <div style="margin-top:12px">${renderCustomerWorkItemsTable(workItems)}</div>
+            ${renderCustomerWorkItemsTable(workItems)}
           </section>
         </div>
 
@@ -941,17 +930,17 @@ app.get('/gestionale/lavori', (req, res) => {
   const store = readStore();
   const q = (req.query.q || '').toString().trim();
   const status = (req.query.status || '').toString().trim();
-  const rows = sortJobsForWorklist(filterJobs(store.jobs, store.customers, store.services, q, status));
+  const rows = filterJobs(store.jobs, store.customers, store.services, q, status);
   const body = `
-    <h1>Attivita / Lavori</h1>
+    <h1>Lavori / Commesse</h1>
     <section class="card row-between">
-      <p>Elenco attivita operative per cliente, con stato, scadenza e pagamento.</p>
-      <a class="btn-link" href="/gestionale/lavori/new">+ Nuova attivita</a>
+      <p>Pipeline commerciale e operativa delle richieste clienti.</p>
+      <a class="btn-link" href="/gestionale/lavori/new">+ Nuova commessa</a>
     </section>
 
     <section class="card">
       <form method="get" action="/gestionale/lavori" class="filter-grid">
-        <input type="text" name="q" value="${esc(q)}" placeholder="Cerca attivita/cliente/servizio" />
+        <input type="text" name="q" value="${esc(q)}" placeholder="Cerca commessa/cliente/servizio" />
         <select name="status">
           <option value="">Tutti gli stati</option>
           ${JOB_STATUS_OPTIONS.map((s) => `<option value="${s}" ${status === s ? 'selected' : ''}>${esc(labelJobStatus(s))}</option>`).join('')}
@@ -961,7 +950,7 @@ app.get('/gestionale/lavori', (req, res) => {
       ${renderJobsTable(rows, store.customers, store.services, true)}
     </section>
   `;
-  res.send(renderAppLayout('Gestionale - Attivita', body, req.user, true));
+  res.send(renderAppLayout('Gestionale - Lavori', body, req.user, true));
 });
 
 app.get('/gestionale/lavori/new', (req, res) => {
@@ -993,14 +982,14 @@ app.get('/gestionale/lavori/new', (req, res) => {
     .replace(/>/g, '\\u003e')
     .replace(/&/g, '\\u0026');
   const body = `
-    <h1>Crea Attivita</h1>
+    <h1>Crea Affare</h1>
     ${notice}
     <section class="card">
       <form method="post" action="/gestionale/lavori/new" class="form-grid">
-        <h2>Informazioni Attivita</h2>
+        <h2>Informazioni Affare</h2>
         <div class="affare-grid">
-          <label for="title">Nome Attivita</label>
-          <input id="title" type="text" name="title" placeholder="Nome attivita" required />
+          <label for="title">Nome Affare</label>
+          <input id="title" type="text" name="title" placeholder="Nome affare" required />
 
           <label for="companySearch">Nome Societa</label>
           <div>
@@ -1054,7 +1043,7 @@ app.get('/gestionale/lavori/new', (req, res) => {
           <input id="dueDate" type="date" name="dueDate" />
 
           <label for="description">Descrizione</label>
-          <textarea id="description" name="description" rows="3" placeholder="Alcune osservazioni su attivita"></textarea>
+          <textarea id="description" name="description" rows="3" placeholder="Alcune osservazioni su affare"></textarea>
         </div>
 
         <h2>Informazioni addizionali</h2>
@@ -1089,7 +1078,7 @@ app.get('/gestionale/lavori/new', (req, res) => {
 
         <div class="row-between">
           <select name="serviceId"><option value="">Servizio collegato (opzionale)</option>${serviceOptions}</select>
-          <button type="submit">Crea Attivita</button>
+          <button type="submit">Crea Affare</button>
         </div>
       </form>
     </section>
@@ -1138,7 +1127,7 @@ app.get('/gestionale/lavori/new', (req, res) => {
       })();
     </script>
   `;
-  res.send(renderAppLayout('Gestionale - Nuova Attivita', body, req.user, true));
+  res.send(renderAppLayout('Gestionale - Nuova Commessa', body, req.user, true));
 });
 
 app.post('/gestionale/lavori/new', (req, res) => {
@@ -1229,46 +1218,32 @@ app.get('/gestionale/lavori/:id', (req, res) => {
   }
   const customer = store.customers.find((c) => Number(c.id) === Number(job.customerId || 0));
   const service = store.services.find((s) => Number(s.id) === Number(job.serviceId || 0));
-  const customerOptions = store.customers
-    .map((c) => `<option value="${c.id}" ${Number(c.id) === Number(job.customerId || 0) ? 'selected' : ''}>${esc(c.company || `${c.firstName} ${c.lastName}`)}</option>`)
-    .join('');
-  const serviceOptions = ['<option value="">Nessun servizio collegato</option>']
-    .concat(store.services.map((s) => `<option value="${s.id}" ${Number(s.id) === Number(job.serviceId || 0) ? 'selected' : ''}>${esc(s.name)}</option>`))
-    .join('');
   const body = `
-    <h1>Scheda attivita</h1>
+    <h1>Scheda lavoro</h1>
     <section class="card">
-      <a class="btn-link" href="/gestionale/lavori">← Torna a attivita/lavori</a>
+      <a class="btn-link" href="/gestionale/lavori">← Torna a lavori/commesse</a>
     </section>
     <section class="card">
       <form method="post" action="/gestionale/lavori/${id}/update" class="form-grid two-col">
-        <div class="form-grid">
-          <select name="customerId" required>${customerOptions}</select>
-          ${customer ? `<div><a class="btn-link" href="/gestionale/clienti/${customer.id}">Apri scheda cliente</a></div>` : ''}
-        </div>
-        <select name="serviceId">${serviceOptions}</select>
+        <input type="text" value="${esc(customer ? (customer.company || `${customer.firstName} ${customer.lastName}`) : 'Cliente non associato')}" disabled />
+        <input type="text" value="${esc(service ? service.name : 'Nessun servizio collegato')}" disabled />
 
         <input type="text" name="title" placeholder="Nome lavoro" value="${esc(job.title || '')}" required />
         <select name="status" required>
           ${JOB_STATUS_OPTIONS.map((s) => `<option value="${s}" ${job.status === s ? 'selected' : ''}>${esc(labelJobStatus(s))}</option>`).join('')}
         </select>
 
-        <input type="date" name="startDate" value="${esc(((job.startDate || (job.createdAt || '')).slice(0, 10)) || '')}" />
         <input type="date" name="dueDate" value="${esc((job.dueDate || '').slice(0, 10))}" />
         <input type="number" name="amount" step="0.01" min="0" value="${Number(job.amount || 0).toFixed(2)}" />
-        <select name="paymentStatus">
-          <option value="pending" ${job.paymentStatus !== 'paid' ? 'selected' : ''}>Pagamento: in attesa</option>
-          <option value="paid" ${job.paymentStatus === 'paid' ? 'selected' : ''}>Pagamento: pagato</option>
-        </select>
 
         <textarea name="description" rows="4" placeholder="Descrizione / note">${esc(job.description || job.notes || '')}</textarea>
         <textarea name="notes" rows="4" placeholder="Note operative interne">${esc(job.notes || '')}</textarea>
 
-        <button type="submit">Salva modifiche attivita</button>
+        <button type="submit">Salva modifiche lavoro</button>
       </form>
     </section>
   `;
-  res.send(renderAppLayout('Gestionale - Scheda Attivita', body, req.user, true));
+  res.send(renderAppLayout('Gestionale - Scheda Lavoro', body, req.user, true));
 });
 
 app.post('/gestionale/lavori/:id/update', (req, res) => {
@@ -1277,18 +1252,11 @@ app.post('/gestionale/lavori/:id/update', (req, res) => {
   const job = store.jobs.find((j) => Number(j.id) === id);
   if (!job) return res.redirect('/gestionale/lavori');
 
-  const customerId = Number(req.body.customerId || 0);
-  if (customerId && store.customers.some((c) => Number(c.id) === customerId)) {
-    job.customerId = customerId;
-  }
-  job.serviceId = Number(req.body.serviceId || 0) || null;
   job.title = (req.body.title || '').trim() || job.title;
   job.status = normalizeJobStatus(req.body.status);
-  job.startDate = (req.body.startDate || '').trim();
   job.dueDate = (req.body.dueDate || '').trim();
   const amount = Number(req.body.amount || 0);
   if (Number.isFinite(amount)) job.amount = amount;
-  job.paymentStatus = req.body.paymentStatus === 'paid' ? 'paid' : 'pending';
   job.description = (req.body.description || '').trim();
   job.notes = (req.body.notes || '').trim() || job.description;
   job.updatedAt = new Date().toISOString();
@@ -1330,142 +1298,28 @@ app.post('/gestionale/lavori/:id/delete', (req, res) => {
   res.redirect(req.get('referer') || '/gestionale/lavori');
 });
 
-app.get('/gestionale/rinnovi', (_req, res) => {
-  res.redirect('/gestionale/debiti');
-});
-
-app.get('/gestionale/debiti', (req, res) => {
+app.get('/gestionale/rinnovi', (req, res) => {
   const store = readStore();
   const q = (req.query.q || '').toString().trim();
   const payment = (req.query.payment || '').toString().trim();
-  const type = (req.query.type || '').toString().trim();
-  const items = filterDebtItems(buildDebtItems(store), q, payment, type);
-  const recurringItems = items.filter((item) => item.itemType === 'subscription');
+  const renewals = filterRenewals(chronologicalRenewals(store), store.services, q, payment);
   const body = `
-    <h1>Debiti Clienti</h1>
+    <h1>Rinnovi</h1>
     <section class="card">
-      <h2>Situazione pagamenti per cliente e voce di costo</h2>
-      <form method="get" action="/gestionale/debiti" class="filter-grid">
-        <input type="text" name="q" value="${esc(q)}" placeholder="Cerca cliente/attivita/servizio" />
+      <h2>Rinnovi in ordine cronologico</h2>
+      <form method="get" action="/gestionale/rinnovi" class="filter-grid">
+        <input type="text" name="q" value="${esc(q)}" placeholder="Cerca cliente/servizio" />
         <select name="payment">
           <option value="">Stato pagamento: tutti</option>
           <option value="pending" ${payment === 'pending' ? 'selected' : ''}>In attesa</option>
           <option value="paid" ${payment === 'paid' ? 'selected' : ''}>Pagato</option>
         </select>
-        <select name="type">
-          <option value="">Tipo costo: tutti</option>
-          <option value="one_time" ${type === 'one_time' ? 'selected' : ''}>Una tantum</option>
-          <option value="subscription" ${type === 'subscription' ? 'selected' : ''}>Abbonamento ricorrente</option>
-        </select>
         <button type="submit">Filtra</button>
       </form>
-      <div style="margin-top:12px">${renderDebtsByCustomerTable(items)}</div>
-      <div style="margin-top:12px">${renderDebtItemsTable(items, true)}</div>
-    </section>
-    <section class="card">
-      <h2>Rinnovi ricorrenti in scadenza</h2>
-      ${renderDebtItemsTable(recurringItems, true)}
+      ${renderRenewalsTable(renewals, store.services, store.customers, true)}
     </section>
   `;
-  res.send(renderAppLayout('Gestionale - Debiti Clienti', body, req.user, true));
-});
-
-app.get('/gestionale/abbonamenti/:id', (req, res) => {
-  const store = readStore();
-  const id = Number(req.params.id || 0);
-  const sub = store.subscriptions.find((s) => Number(s.id) === id);
-  if (!sub) {
-    return res.status(404).send(renderPublicPage('Abbonamento non trovato', '<p>Abbonamento non trovato.</p>'));
-  }
-  const customer = store.customers.find((c) => Number(c.id) === Number(sub.customerId || 0));
-  const service = store.services.find((s) => Number(s.id) === Number(sub.serviceId || 0));
-  const customerOptions = store.customers
-    .map((c) => `<option value="${c.id}" ${Number(c.id) === Number(sub.customerId || 0) ? 'selected' : ''}>${esc(c.company || `${c.firstName} ${c.lastName}`)}</option>`)
-    .join('');
-  const serviceOptions = store.services
-    .map((s) => `<option value="${s.id}" ${Number(s.id) === Number(sub.serviceId || 0) ? 'selected' : ''}>${esc(s.name)}</option>`)
-    .join('');
-  const body = `
-    <h1>Scheda abbonamento</h1>
-    <section class="card">
-      <a class="btn-link" href="/gestionale/debiti">← Torna a debiti clienti</a>
-      ${customer ? `<a class="btn-link" href="/gestionale/clienti/${customer.id}" style="margin-left:8px">Apri cliente</a>` : ''}
-    </section>
-    <section class="card">
-      <form method="post" action="/gestionale/abbonamenti/${id}/update" class="form-grid two-col">
-        <select name="customerId" required>${customerOptions}</select>
-        <select name="serviceId" required>${serviceOptions}</select>
-
-        <input type="date" name="purchaseDate" value="${esc((sub.purchaseDate || '').slice(0, 10))}" required />
-        <input type="date" name="renewalDate" value="${esc((sub.renewalDate || '').slice(0, 10))}" />
-
-        <select name="billingType">
-          <option value="one_time" ${sub.billingType !== 'subscription' ? 'selected' : ''}>Una tantum</option>
-          <option value="subscription" ${sub.billingType === 'subscription' ? 'selected' : ''}>Abbonamento ricorrente</option>
-        </select>
-        <select name="billingInterval">
-          <option value="monthly" ${sub.billingInterval === 'monthly' ? 'selected' : ''}>Mensile</option>
-          <option value="semiannual" ${sub.billingInterval === 'semiannual' ? 'selected' : ''}>Semestrale</option>
-          <option value="annual" ${sub.billingInterval === 'annual' ? 'selected' : ''}>Annuale</option>
-        </select>
-
-        <input type="number" name="priceAtSale" step="0.01" min="0" value="${Number(sub.priceAtSale || 0).toFixed(2)}" />
-        <select name="status">
-          <option value="active" ${sub.status === 'active' ? 'selected' : ''}>Attivo</option>
-          <option value="expired" ${sub.status === 'expired' ? 'selected' : ''}>Scaduto</option>
-          <option value="cancelled" ${sub.status === 'cancelled' ? 'selected' : ''}>Annullato</option>
-        </select>
-
-        <select name="paymentStatus">
-          <option value="pending" ${sub.paymentStatus !== 'paid' ? 'selected' : ''}>Pagamento: in attesa</option>
-          <option value="paid" ${sub.paymentStatus === 'paid' ? 'selected' : ''}>Pagamento: pagato</option>
-        </select>
-        <input type="text" value="${esc(service ? service.name : 'Servizio non collegato')}" disabled />
-
-        <textarea name="notes" rows="3" placeholder="Note">${esc(sub.notes || '')}</textarea>
-        <button type="submit">Salva abbonamento</button>
-      </form>
-    </section>
-  `;
-  res.send(renderAppLayout('Gestionale - Scheda Abbonamento', body, req.user, true));
-});
-
-app.post('/gestionale/abbonamenti/:id/update', (req, res) => {
-  const store = readStore();
-  const id = Number(req.params.id || 0);
-  const sub = store.subscriptions.find((s) => Number(s.id) === id);
-  if (!sub) return res.redirect('/gestionale/debiti');
-
-  const customerId = Number(req.body.customerId || 0);
-  if (customerId && store.customers.some((c) => Number(c.id) === customerId)) {
-    sub.customerId = customerId;
-    const customer = store.customers.find((c) => Number(c.id) === customerId);
-    if (customer) {
-      sub.customerName = `${customer.firstName || ''} ${customer.lastName || ''}`.trim();
-      sub.company = customer.company || '';
-      sub.email = customer.email || sub.email;
-      sub.wpUserId = customer.wpUserId || null;
-    }
-  }
-
-  const serviceId = Number(req.body.serviceId || 0);
-  if (serviceId && store.services.some((s) => Number(s.id) === serviceId)) {
-    sub.serviceId = serviceId;
-  }
-
-  sub.purchaseDate = (req.body.purchaseDate || '').trim();
-  sub.renewalDate = (req.body.renewalDate || '').trim();
-  sub.billingType = req.body.billingType === 'subscription' ? 'subscription' : 'one_time';
-  sub.billingInterval = normalizeInterval(req.body.billingInterval || sub.billingInterval);
-  sub.status = ['active', 'expired', 'cancelled'].includes(req.body.status) ? req.body.status : 'active';
-  sub.paymentStatus = req.body.paymentStatus === 'paid' ? 'paid' : 'pending';
-  const price = Number(req.body.priceAtSale || 0);
-  sub.priceAtSale = Number.isFinite(price) ? price : Number(sub.priceAtSale || 0);
-  sub.notes = (req.body.notes || '').trim();
-  sub.updatedAt = new Date().toISOString();
-
-  writeStore(store);
-  return res.redirect(`/gestionale/abbonamenti/${id}`);
+  res.send(renderAppLayout('Gestionale - Rinnovi', body, req.user, true));
 });
 
 app.post('/gestionale/abbonamenti/:id/price', (req, res) => {
@@ -1478,7 +1332,7 @@ app.post('/gestionale/abbonamenti/:id/price', (req, res) => {
     sub.updatedAt = new Date().toISOString();
     writeStore(store);
   }
-  res.redirect(req.get('referer') || '/gestionale/debiti');
+  res.redirect(req.get('referer') || '/gestionale/rinnovi');
 });
 
 app.post('/gestionale/rinnovi/:id/payment', (req, res) => {
@@ -1496,7 +1350,7 @@ app.post('/gestionale/rinnovi/:id/payment', (req, res) => {
     sub.updatedAt = new Date().toISOString();
     writeStore(store);
   }
-  res.redirect(req.get('referer') || '/gestionale/debiti');
+  res.redirect(req.get('referer') || '/gestionale/rinnovi');
 });
 
 app.get('/gestionale/ticket', (req, res) => {
@@ -1694,19 +1548,6 @@ function formatDateItShort(v) {
   return `${m[3]}/${m[2]}/${m[1].slice(2)}`;
 }
 
-function formatDaysTo(v) {
-  const raw = String(v || '').slice(0, 10);
-  if (!raw) return '-';
-  const target = new Date(`${raw}T00:00:00`);
-  if (Number.isNaN(target.getTime())) return '-';
-  const today = new Date();
-  const startToday = new Date(`${today.toISOString().slice(0, 10)}T00:00:00`);
-  const days = Math.round((target.getTime() - startToday.getTime()) / 86400000);
-  if (days === 0) return 'Oggi';
-  if (days > 0) return `${days} gg`;
-  return `Scaduto ${Math.abs(days)} gg`;
-}
-
 function computeExpectedAnnualTotal(subs, year) {
   return subs.reduce((sum, s) => {
     const status = String(s.status || '').toLowerCase();
@@ -1755,214 +1596,6 @@ function buildCustomerWorkItems(jobs, subs, services) {
   });
 
   return [...jobItems, ...subItems].sort((a, b) => String(a.dueDate || '').localeCompare(String(b.dueDate || '')));
-}
-
-function isJobClosedStatus(status) {
-  return String(status || '').startsWith('chiusa_');
-}
-
-function statusPriority(status) {
-  const order = {
-    in_lavorazione: 0,
-    in_attesa_pagamento: 1,
-    scrittura_preventivo: 2,
-    qualificazione_preventivo: 3,
-    gestione_annuale: 4,
-    chiusa_acquisita: 5,
-    chiusa_persa: 6
-  };
-  const key = String(status || '');
-  return Number.isFinite(order[key]) ? order[key] : 99;
-}
-
-function sortJobsForWorklist(jobs) {
-  return [...jobs].sort((a, b) => {
-    const byStatus = statusPriority(a.status) - statusPriority(b.status);
-    if (byStatus !== 0) return byStatus;
-    const dateA = String(a.updatedAt || a.createdAt || '');
-    const dateB = String(b.updatedAt || b.createdAt || '');
-    return dateB.localeCompare(dateA);
-  });
-}
-
-function describeJobCostItems(job, services) {
-  const chunks = [];
-  const service = services.find((s) => Number(s.id) === Number(job.serviceId || 0));
-  if (service) chunks.push(`${service.name} (${labelBilling(service.billingType, service.billingInterval)})`);
-  if (job.productName) chunks.push(job.productName);
-  if (!chunks.length && Number(job.amount || 0) > 0) chunks.push('Voce economica libera');
-  return chunks.length ? chunks.join(' + ') : '-';
-}
-
-function renderCustomerActivitiesTable(jobs, subs, services) {
-  if (!jobs.length) return '<p>Nessuna attivita associata a questo cliente.</p>';
-  const rows = jobs.map((j) => {
-    const isPaid = j.paymentStatus === 'paid';
-    const payment = isPaid ? 'Pagato' : 'In attesa';
-    return `<tr>
-      <td><a href="/gestionale/lavori/${j.id}">${esc(j.title || 'Attivita')}</a></td>
-      <td>${esc(labelJobStatus(j.status))}</td>
-      <td>${esc(formatDateItShort((j.createdAt || '').slice(0, 10) || '-'))}</td>
-      <td>${esc(formatDateItShort(j.dueDate || '-'))}</td>
-      <td>${esc(describeJobCostItems(j, services))}</td>
-      <td>€ ${Number(j.amount || 0).toFixed(2)}</td>
-      <td>${payment}</td>
-    </tr>`;
-  }).join('');
-
-  const recurringRows = subs.length ? renderSubscriptionsTableForAdmin(subs, services, false) : '<p class="muted">Nessun abbonamento ricorrente associato.</p>';
-  return `
-    <table class="tbl">
-      <thead><tr><th>Attivita</th><th>Stato</th><th>Apertura</th><th>Fine prevista</th><th>Servizi / Voci costo</th><th>Valore</th><th>Pagamento</th></tr></thead>
-      <tbody>${rows}</tbody>
-    </table>
-    <div style="margin-top:12px">
-      <h3>Servizi ricorrenti collegati al cliente</h3>
-      ${recurringRows}
-    </div>
-  `;
-}
-
-function buildDebtItems(store) {
-  const jobItems = store.jobs.map((j) => {
-    const customer = store.customers.find((c) => Number(c.id) === Number(j.customerId || 0));
-    return {
-      itemKind: 'job',
-      id: Number(j.id),
-      customerId: Number(j.customerId || 0),
-      customerName: customer ? (customer.company || `${customer.firstName} ${customer.lastName}`.trim()) : 'Cliente non associato',
-      itemName: j.title || 'Attivita',
-      itemType: 'one_time',
-      itemTypeLabel: 'Una tantum',
-      dueDate: j.dueDate || (j.createdAt || '').slice(0, 10),
-      amount: Number(j.amount || 0),
-      paymentStatus: j.paymentStatus === 'paid' ? 'paid' : 'pending',
-      statusLabel: labelJobStatus(j.status),
-      ignoreOutstanding: j.status === 'chiusa_persa'
-    };
-  });
-
-  const subItems = store.subscriptions.map((s) => {
-    const customer = store.customers.find((c) => Number(c.id) === Number(s.customerId || 0));
-    const service = store.services.find((x) => Number(x.id) === Number(s.serviceId || 0));
-    const type = s.billingType === 'subscription' ? 'subscription' : 'one_time';
-    return {
-      itemKind: 'subscription',
-      id: Number(s.id),
-      customerId: Number(s.customerId || 0),
-      customerName: customer ? (customer.company || `${customer.firstName} ${customer.lastName}`.trim()) : (s.company || s.customerName || 'Cliente non associato'),
-      itemName: service ? service.name : 'Servizio',
-      itemType: type,
-      itemTypeLabel: type === 'subscription' ? 'Abbonamento ricorrente' : 'Una tantum',
-      dueDate: s.renewalDate || s.purchaseDate || '',
-      amount: Number(s.priceAtSale || 0),
-      paymentStatus: s.paymentStatus === 'paid' ? 'paid' : 'pending',
-      statusLabel: s.status || '-',
-      ignoreOutstanding: false
-    };
-  });
-
-  return [...jobItems, ...subItems];
-}
-
-function filterDebtItems(items, q, payment, type) {
-  const query = String(q || '').trim().toLowerCase();
-  return items
-    .filter((item) => {
-      if (payment && item.paymentStatus !== payment) return false;
-      if (type && item.itemType !== type) return false;
-      if (!query) return true;
-      const blob = `${item.customerName} ${item.itemName} ${item.itemTypeLabel} ${item.statusLabel}`.toLowerCase();
-      return blob.includes(query);
-    })
-    .sort((a, b) => {
-      const unpaidA = a.paymentStatus === 'paid' ? 1 : 0;
-      const unpaidB = b.paymentStatus === 'paid' ? 1 : 0;
-      if (unpaidA !== unpaidB) return unpaidA - unpaidB;
-      return String(a.dueDate || '').localeCompare(String(b.dueDate || ''));
-    });
-}
-
-function debtDetailUrl(item) {
-  if (!item) return '';
-  if (item.itemKind === 'job') return `/gestionale/lavori/${item.id}`;
-  if (item.itemKind === 'subscription') return `/gestionale/abbonamenti/${item.id}`;
-  return '';
-}
-
-function renderDebtsByCustomerTable(items) {
-  if (!items.length) return '<p>Nessun debito cliente trovato con i filtri correnti.</p>';
-  const byCustomer = new Map();
-  for (const item of items) {
-    const key = String(item.customerId || item.customerName || '0');
-    if (!byCustomer.has(key)) {
-      byCustomer.set(key, { name: item.customerName || '-', due: 0, paid: 0 });
-    }
-    const row = byCustomer.get(key);
-    if (item.paymentStatus === 'paid') {
-      row.paid += Number(item.amount || 0);
-    } else if (!item.ignoreOutstanding) {
-      row.due += Number(item.amount || 0);
-    }
-  }
-
-  const rows = [...byCustomer.values()]
-    .sort((a, b) => b.due - a.due)
-    .map((r) => `<tr><td>${esc(r.name)}</td><td>€ ${r.due.toFixed(2)}</td><td>€ ${r.paid.toFixed(2)}</td><td>€ ${Math.max(0, r.due).toFixed(2)}</td></tr>`)
-    .join('');
-  return `<table class="tbl"><thead><tr><th>Cliente</th><th>Da pagare</th><th>Pagato</th><th>Residuo</th></tr></thead><tbody>${rows}</tbody></table>`;
-}
-
-function renderDebtItemsTable(items, withActions = false) {
-  if (!items.length) return '<p>Nessuna voce di costo disponibile.</p>';
-  const rows = items.map((item) => {
-    const detailUrl = debtDetailUrl(item);
-    const daysLeft = formatDaysTo(item.dueDate || '');
-    const itemLink = detailUrl ? `<a href="${detailUrl}">${esc(item.itemName)}</a>` : esc(item.itemName);
-    const customerCell = item.customerId ? `<a href="/gestionale/clienti/${item.customerId}">${esc(item.customerName)}</a>` : esc(item.customerName);
-    const action = !withActions
-      ? (item.paymentStatus === 'paid' ? 'Pagato' : 'In attesa')
-      : item.itemKind === 'job'
-        ? `<form method="post" action="/gestionale/lavori/${item.id}/payment" class="inline-actions">
-            <select name="paymentStatus">
-              <option value="pending" ${item.paymentStatus !== 'paid' ? 'selected' : ''}>In attesa</option>
-              <option value="paid" ${item.paymentStatus === 'paid' ? 'selected' : ''}>Pagato</option>
-            </select>
-            <button type="submit">Salva</button>
-          </form>`
-        : `<form method="post" action="/gestionale/rinnovi/${item.id}/payment" class="inline-actions">
-            <select name="paymentStatus">
-              <option value="pending" ${item.paymentStatus !== 'paid' ? 'selected' : ''}>In attesa</option>
-              <option value="paid" ${item.paymentStatus === 'paid' ? 'selected' : ''}>Pagato</option>
-            </select>
-            <button type="submit">Salva</button>
-          </form>`;
-
-    return `<tr class="${detailUrl ? 'js-row-link' : ''}" ${detailUrl ? `data-href="${detailUrl}"` : ''}>
-      <td>${customerCell}</td>
-      <td>${itemLink}</td>
-      <td>${esc(formatDateItShort(item.dueDate || '-'))}</td>
-      <td>${esc(daysLeft)}</td>
-      <td>€ ${Number(item.amount || 0).toFixed(2)}</td>
-      <td>${action}</td>
-    </tr>`;
-  }).join('');
-
-  return `<table class="tbl"><thead><tr><th>Cliente</th><th>Voce</th><th>Scadenza</th><th>Giorni</th><th>Importo</th><th>Pagamento</th></tr></thead><tbody>${rows}</tbody></table>`;
-}
-
-function renderJobsByStatusBoard(jobs, customers, services) {
-  if (!jobs.length) return '<p>Nessuna attivita.</p>';
-  const grouped = JOB_STATUS_OPTIONS.map((status) => ({
-    status,
-    rows: jobs.filter((j) => String(j.status || '') === status)
-  })).filter((g) => g.rows.length);
-  return grouped
-    .map((group) => `<section class="card" style="margin-top:10px">
-      <h3>${esc(labelJobStatus(group.status))} (${group.rows.length})</h3>
-      ${renderJobsTable(group.rows, customers, services, true)}
-    </section>`)
-    .join('');
 }
 
 function computeOutstandingTotalFromItems(items) {
@@ -2759,47 +2392,34 @@ function renderCustomerNotes(notes) {
 }
 
 function renderJobsTable(jobs, customers, services, includeActions) {
-  if (!jobs.length) return '<p>Nessuna attivita.</p>';
+  if (!jobs.length) return '<p>Nessuna commessa.</p>';
 
   const rows = jobs
     .map((j) => {
       const customer = customers.find((c) => Number(c.id) === Number(j.customerId || 0));
       const customerName = customer ? (customer.company || `${customer.firstName} ${customer.lastName}`) : 'N/A';
       const customerCell = customer ? `<a href="/gestionale/clienti/${customer.id}">${esc(customerName)}</a>` : esc(customerName);
-      const paymentStatus = j.paymentStatus === 'paid' ? 'Pagato' : 'In attesa';
-      const daysLeft = formatDaysTo(j.dueDate || '');
       const actions = includeActions
         ? `<div class="inline-actions">
             <form method="post" action="/gestionale/lavori/${j.id}/status" class="inline-actions js-auto-submit">
               <select name="status">${JOB_STATUS_OPTIONS.map((s) => `<option value="${s}" ${j.status === s ? 'selected' : ''}>${esc(labelJobStatus(s))}</option>`).join('')}</select>
             </form>
-            <form method="post" action="/gestionale/lavori/${j.id}/payment" class="inline-actions">
-              <select name="paymentStatus">
-                <option value="pending" ${j.paymentStatus !== 'paid' ? 'selected' : ''}>In attesa</option>
-                <option value="paid" ${j.paymentStatus === 'paid' ? 'selected' : ''}>Pagato</option>
-              </select>
-              <button type="submit">Pagamento</button>
-            </form>
-            <a class="btn-link" href="/gestionale/lavori/${j.id}">Scheda attivita</a>
+            <a class="btn-link" href="/gestionale/lavori/${j.id}">Scheda</a>
             <form method="post" action="/gestionale/lavori/${j.id}/delete" onsubmit="return confirm('Eliminare questo lavoro?');">
               <button type="submit" class="danger-btn ghost icon-btn" title="Elimina lavoro" aria-label="Elimina lavoro">🗑</button>
             </form>
           </div>`
         : '-';
-      return `<tr class="js-row-link" data-href="/gestionale/lavori/${j.id}">
-        <td><a href="/gestionale/lavori/${j.id}">${esc(j.title || 'Attivita')}</a></td>
+      return `<tr>
         <td>${customerCell}</td>
         <td>${esc(formatDateItShort(j.dueDate || '-'))}</td>
-        <td>${esc(daysLeft)}</td>
         <td>€ ${Number(j.amount || 0).toFixed(2)}</td>
-        <td>${esc(labelJobStatus(j.status))}</td>
-        <td>${paymentStatus}</td>
         <td>${actions}</td>
       </tr>`;
     })
     .join('');
 
-  return `<table class="tbl tbl-compact"><thead><tr><th>Attivita</th><th>Cliente</th><th>Scadenza</th><th>Giorni</th><th>Importo</th><th>Stato</th><th>Pagamento</th><th>Azione</th></tr></thead><tbody>${rows}</tbody></table>`;
+  return `<table class="tbl tbl-compact"><thead><tr><th>Cliente</th><th>Scadenza</th><th>Importo</th><th>Azione</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
 async function sendRenewalReminders() {
@@ -2890,9 +2510,9 @@ function renderAppLayout(title, body, user, isAdmin) {
       <aside class="side-nav" aria-label="Navigazione gestionale">
         <h3>Navigazione</h3>
         <a data-path="/gestionale" href="/gestionale">Dashboard</a>
-        <a data-path="/gestionale/lavori" href="/gestionale/lavori">Attivita</a>
+        <a data-path="/gestionale/lavori" href="/gestionale/lavori">Lavori</a>
         <a data-path="/gestionale/servizi" href="/gestionale/servizi">Servizi</a>
-        <a data-path="/gestionale/debiti" href="/gestionale/debiti">Debiti clienti</a>
+        <a data-path="/gestionale/rinnovi" href="/gestionale/rinnovi">Rinnovi</a>
         <a data-path="/gestionale/importazioni" href="/gestionale/importazioni">Importazioni</a>
         <a data-path="/gestionale/clienti" href="/gestionale/clienti">Clienti</a>
         <a data-path="/gestionale/ticket" href="/gestionale/ticket">Ticket</a>
@@ -2964,16 +2584,6 @@ function renderAppLayout(title, body, user, isAdmin) {
             if (form) form.submit();
           });
         });
-
-        document.querySelectorAll('tr.js-row-link[data-href]').forEach((row) => {
-          row.addEventListener('click', (event) => {
-            const target = event.target;
-            if (!target) return;
-            if (target.closest('a, button, input, select, textarea, form, label')) return;
-            const href = row.getAttribute('data-href');
-            if (href) window.location.href = href;
-          });
-        });
       })();
     </script>
   </body>
@@ -3025,8 +2635,6 @@ function baseStyles() {
     .tbl { width:100%; border-collapse:collapse; table-layout:auto; }
     .tbl th, .tbl td { border-bottom:1px solid #ecf1ed; text-align:left; padding:8px; font-size:.93rem; vertical-align:top; }
     .tbl th { color:#334155; background:#f8fbf9; position: sticky; top: 0; }
-    .tbl tr.js-row-link { cursor:pointer; }
-    .tbl tr.js-row-link:hover td { background:#f8fbf9; }
     .tbl.tbl-compact th, .tbl.tbl-compact td { padding:6px 7px; font-size:.88rem; }
     .tbl .inline-actions input, .tbl .inline-actions select { min-width:120px; width:auto; padding:7px 8px; }
     .tbl .inline-actions button { padding:7px 9px; }
