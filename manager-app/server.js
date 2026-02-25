@@ -984,6 +984,11 @@ app.get('/gestionale/lavori/new', (req, res) => {
     })
     .join('');
   const serviceOptions = store.services.map((s) => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
+  const servicesForUi = store.services.map((s) => ({ id: Number(s.id), name: s.name || '' }));
+  const servicesJson = JSON.stringify(servicesForUi)
+    .replace(/</g, '\\u003c')
+    .replace(/>/g, '\\u003e')
+    .replace(/&/g, '\\u0026');
   const customerJson = JSON.stringify(customersForUi)
     .replace(/</g, '\\u003c')
     .replace(/>/g, '\\u003e')
@@ -1085,10 +1090,16 @@ app.get('/gestionale/lavori/new', (req, res) => {
 
         <div class="row-between">
           <div class="form-grid" style="width:100%">
-            <label for="serviceIds">Servizi collegati (uno o piu)</label>
-            <select id="serviceIds" name="serviceIds" multiple size="5">
-              ${serviceOptions}
-            </select>
+            <label for="servicePickerNew">Servizi collegati (aggiungi con +)</label>
+            <div class="inline-actions">
+              <select id="servicePickerNew">
+                <option value="">Seleziona servizio</option>
+                ${serviceOptions}
+              </select>
+              <button type="button" id="serviceAddBtnNew" class="copy-btn">+</button>
+            </div>
+            <div id="serviceListNew" class="selected-service-list"></div>
+            <div id="serviceHiddenNew"></div>
           </div>
           <button type="submit">Crea Affare</button>
         </div>
@@ -1103,6 +1114,12 @@ app.get('/gestionale/lavori/new', (req, res) => {
         const contactName = document.getElementById('contactName');
         const contactEmail = document.getElementById('contactEmail');
         const selectedId = ${selectedCustomerId || 0};
+        const servicesData = ${servicesJson};
+        const servicePicker = document.getElementById('servicePickerNew');
+        const serviceAddBtn = document.getElementById('serviceAddBtnNew');
+        const serviceList = document.getElementById('serviceListNew');
+        const serviceHidden = document.getElementById('serviceHiddenNew');
+        const selectedServices = [];
 
         function syncContactFromCustomer() {
           const val = select.value;
@@ -1136,6 +1153,38 @@ app.get('/gestionale/lavori/new', (req, res) => {
         });
 
         search.addEventListener('input', applySearch);
+
+        function escText(v) {
+          return String(v || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        }
+
+        function renderSelectedServices() {
+          serviceList.innerHTML = selectedServices.length
+            ? selectedServices.map((id) => {
+              const srv = servicesData.find((s) => Number(s.id) === Number(id));
+              const label = srv ? srv.name : ('Servizio #' + id);
+              return '<div class="selected-service-item"><span>' + escText(label) + '</span><button type="button" class="danger-btn ghost js-remove-service" data-id="' + id + '">-</button></div>';
+            }).join('')
+            : '<p class="muted">Nessun servizio aggiunto.</p>';
+          serviceHidden.innerHTML = selectedServices.map((id) => '<input type="hidden" name="serviceIds" value="' + id + '" />').join('');
+          serviceList.querySelectorAll('.js-remove-service').forEach((btn) => {
+            btn.addEventListener('click', () => {
+              const id = Number(btn.getAttribute('data-id') || 0);
+              const idx = selectedServices.indexOf(id);
+              if (idx >= 0) selectedServices.splice(idx, 1);
+              renderSelectedServices();
+            });
+          });
+        }
+
+        serviceAddBtn.addEventListener('click', () => {
+          const value = Number(servicePicker.value || 0);
+          if (!value) return;
+          if (!selectedServices.includes(value)) selectedServices.push(value);
+          renderSelectedServices();
+        });
+
+        renderSelectedServices();
       })();
     </script>
   `;
@@ -1241,8 +1290,14 @@ app.get('/gestionale/lavori/:id', (req, res) => {
     .map((c) => `<option value="${c.id}" ${Number(c.id) === Number(job.customerId || 0) ? 'selected' : ''}>${esc(c.company || `${c.firstName} ${c.lastName}`)}</option>`)
     .join('');
   const serviceOptions = store.services
-    .map((s) => `<option value="${s.id}" ${jobServiceIds.includes(Number(s.id)) ? 'selected' : ''}>${esc(s.name)}</option>`)
+    .map((s) => `<option value="${s.id}">${esc(s.name)}</option>`)
     .join('');
+  const servicesForUi = store.services.map((s) => ({ id: Number(s.id), name: s.name || '' }));
+  const servicesJson = JSON.stringify(servicesForUi)
+    .replace(/</g, '\\u003c')
+    .replace(/>/g, '\\u003e')
+    .replace(/&/g, '\\u0026');
+  const selectedServiceIdsJson = JSON.stringify(jobServiceIds);
   const recurringRows = relatedRecurring.length
     ? relatedRecurring.map((s) => {
       const srv = store.services.find((x) => Number(x.id) === Number(s.serviceId || 0));
@@ -1333,8 +1388,16 @@ app.get('/gestionale/lavori/:id', (req, res) => {
             </div>
 
             <div class="form-grid">
-              <label for="jobServices">Servizi collegati (uno o piu)</label>
-              <select id="jobServices" name="serviceIds" multiple size="5">${serviceOptions}</select>
+              <label for="servicePickerEdit">Servizi collegati (aggiungi con +)</label>
+              <div class="inline-actions">
+                <select id="servicePickerEdit">
+                  <option value="">Seleziona servizio</option>
+                  ${serviceOptions}
+                </select>
+                <button type="button" id="serviceAddBtnEdit" class="copy-btn">+</button>
+              </div>
+              <div id="serviceListEdit" class="selected-service-list"></div>
+              <div id="serviceHiddenEdit"></div>
             </div>
             <div class="form-grid">
               <label for="jobStatus">Fase attivita</label>
@@ -1438,6 +1501,13 @@ app.get('/gestionale/lavori/:id', (req, res) => {
           });
         });
 
+        const servicesData = ${servicesJson};
+        const selectedServices = ${selectedServiceIdsJson};
+        const servicePicker = document.getElementById('servicePickerEdit');
+        const serviceAddBtn = document.getElementById('serviceAddBtnEdit');
+        const serviceList = document.getElementById('serviceListEdit');
+        const serviceHidden = document.getElementById('serviceHiddenEdit');
+
         document.querySelectorAll('.js-note-edit').forEach((btn) => {
           btn.addEventListener('click', () => {
             const target = btn.getAttribute('data-target');
@@ -1454,6 +1524,38 @@ app.get('/gestionale/lavori/:id', (req, res) => {
             btn.hidden = true;
           });
         });
+
+        function escText(v) {
+          return String(v || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        }
+
+        function renderSelectedServices() {
+          serviceList.innerHTML = selectedServices.length
+            ? selectedServices.map((id) => {
+              const srv = servicesData.find((s) => Number(s.id) === Number(id));
+              const label = srv ? srv.name : ('Servizio #' + id);
+              return '<div class="selected-service-item"><span>' + escText(label) + '</span><button type="button" class="danger-btn ghost js-remove-service" data-id="' + id + '">-</button></div>';
+            }).join('')
+            : '<p class="muted">Nessun servizio aggiunto.</p>';
+          serviceHidden.innerHTML = selectedServices.map((id) => '<input type="hidden" name="serviceIds" value="' + id + '" />').join('');
+          serviceList.querySelectorAll('.js-remove-service').forEach((btn) => {
+            btn.addEventListener('click', () => {
+              const id = Number(btn.getAttribute('data-id') || 0);
+              const idx = selectedServices.indexOf(id);
+              if (idx >= 0) selectedServices.splice(idx, 1);
+              renderSelectedServices();
+            });
+          });
+        }
+
+        serviceAddBtn.addEventListener('click', () => {
+          const value = Number(servicePicker.value || 0);
+          if (!value) return;
+          if (!selectedServices.includes(value)) selectedServices.push(value);
+          renderSelectedServices();
+        });
+
+        renderSelectedServices();
       })();
     </script>
   `;
@@ -3406,6 +3508,8 @@ function baseStyles() {
     .contact-list { list-style:none; padding:0; margin:8px 0 0; display:grid; gap:8px; }
     .contact-item { border:1px solid var(--line); border-radius:8px; padding:8px; display:flex; justify-content:space-between; align-items:center; gap:8px; }
     .inline-actions { display:flex; gap:8px; align-items:center; flex-wrap:nowrap; }
+    .selected-service-list { display:grid; gap:8px; margin-top:8px; }
+    .selected-service-item { display:flex; justify-content:space-between; align-items:center; gap:8px; border:1px solid var(--line); border-radius:8px; padding:8px 10px; background:#f8fbf9; }
     .affare-grid { display:grid; gap:10px; grid-template-columns: 180px minmax(0, 1fr); align-items:center; }
     .inline-create { margin-top:8px; border:1px solid #bbf7d0; border-radius:8px; padding:8px 10px; background:#f0fdf4; }
     .inline-create summary { cursor:pointer; color:#166534; font-weight:600; }
