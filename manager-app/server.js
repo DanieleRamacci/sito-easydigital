@@ -349,6 +349,29 @@ app.post('/gestionale/servizi/new', (req, res) => {
   res.redirect('/gestionale/servizi');
 });
 
+app.post('/gestionale/servizi/:id/price', (req, res) => {
+  const store = readStore();
+  const id = Number(req.params.id || 0);
+  const service = store.services.find((s) => Number(s.id) === id);
+  if (!service) return res.redirect('/gestionale/servizi');
+  const nextPrice = Number(req.body.price || 0);
+  if (!Number.isFinite(nextPrice) || nextPrice < 0) return res.redirect('/gestionale/servizi');
+  const previousPrice = Number(service.price || 0);
+  if (!Array.isArray(service.priceHistory)) service.priceHistory = [];
+  if (previousPrice !== nextPrice) {
+    service.priceHistory.unshift({
+      oldPrice: previousPrice,
+      newPrice: nextPrice,
+      changedAt: new Date().toISOString(),
+      note: (req.body.note || '').trim()
+    });
+  }
+  service.price = nextPrice;
+  service.updatedAt = new Date().toISOString();
+  writeStore(store);
+  return res.redirect('/gestionale/servizi');
+});
+
 app.get('/gestionale/importazioni', (req, res) => {
   const msg = (req.query.msg || '').toString().trim();
   const body = `
@@ -537,7 +560,7 @@ app.get('/gestionale/clienti/:id', (req, res) => {
   const customerSubs = store.subscriptions.filter((s) => Number(s.customerId) === id);
   const customerTickets = store.tickets.filter((t) => Number(t.customerId || 0) === id);
   const customerJobs = store.jobs.filter((j) => Number(j.customerId || 0) === id);
-  const workItems = buildCustomerWorkItems(customerJobs, customerSubs, store.services, store);
+  const customerServiceItems = buildCustomerWorkItems([], customerSubs, store.services, store);
 
   const serviceOptions = store.services
     .map((s) => `<option value="${s.id}">${esc(s.name)} (${labelBilling(s.billingType, s.billingInterval)})</option>`)
@@ -549,8 +572,8 @@ app.get('/gestionale/clienti/:id', (req, res) => {
   const pipelineStage = latestJob ? normalizeJobStatus(latestJob.status) : 'qualificazione_preventivo';
   const totalValue = customerSubs.reduce((sum, s) => sum + Number(s.priceAtSale || 0), 0);
   const customerNotes = Array.isArray(customer.notes) ? [...customer.notes].sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || ''))) : [];
-  const totalDue = computeGrossTotalFromItems(workItems);
-  const paidTotal = computePaidTotalFromItems(workItems, store);
+  const totalDue = computeGrossTotalFromItems(customerServiceItems);
+  const paidTotal = computePaidTotalFromItems(customerServiceItems, store);
   const remaining = Math.max(0, totalDue - paidTotal);
   const contacts = Array.isArray(customer.crmContacts) ? customer.crmContacts : [];
   const contactsList = contacts.length
@@ -726,7 +749,7 @@ app.get('/gestionale/clienti/:id', (req, res) => {
             <div class="row-between">
               <h2>Storico attivita e servizi cliente</h2>
             </div>
-            ${renderCustomerWorkItemsTable(workItems, store, { scopeLabel: 'cliente' })}
+            ${renderCustomerWorkItemsTable(customerServiceItems, store, { scopeLabel: 'cliente' })}
           </section>
         </div>
 
@@ -734,7 +757,7 @@ app.get('/gestionale/clienti/:id', (req, res) => {
           <section class="card">
             <h2>Pagamenti per voce servizio/attivita</h2>
             <p class="muted">Segna pagato/non pagato o registra acconti. Ogni acconto viene salvato nello storico della voce.</p>
-            ${renderCustomerWorkItemsTable(workItems, store, { scopeLabel: 'cliente' })}
+            ${renderCustomerWorkItemsTable(customerServiceItems, store, { scopeLabel: 'cliente' })}
           </section>
         </div>
 
@@ -995,8 +1018,8 @@ app.get('/gestionale/lavori/new', (req, res) => {
       return `<option value="${c.id}" ${selected}>${esc(c.company || `${c.firstName} ${c.lastName}`)} - ${esc(c.email)}</option>`;
     })
     .join('');
-  const serviceOptions = store.services.map((s) => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
-  const servicesForUi = store.services.map((s) => ({ id: Number(s.id), name: s.name || '' }));
+  const serviceOptions = store.services.map((s) => `<option value="${s.id}">${esc(s.name)} (€ ${Number(s.price || 0).toFixed(2)})</option>`).join('');
+  const servicesForUi = store.services.map((s) => ({ id: Number(s.id), name: s.name || '', price: Number(s.price || 0) }));
   const servicesJson = JSON.stringify(servicesForUi)
     .replace(/</g, '\\u003c')
     .replace(/>/g, '\\u003e')
@@ -1061,7 +1084,7 @@ app.get('/gestionale/lavori/new', (req, res) => {
           </div>
 
           <label for="amount">Valore</label>
-          <input id="amount" type="number" name="amount" step="0.01" min="0" placeholder="0.00" />
+          <input id="amount" type="number" name="amount" step="0.01" min="0" placeholder="0.00" readonly />
 
           <label for="dueDate">Data di chiusura</label>
           <input id="dueDate" type="date" name="dueDate" />
@@ -1131,6 +1154,7 @@ app.get('/gestionale/lavori/new', (req, res) => {
         const serviceAddBtn = document.getElementById('serviceAddBtnNew');
         const serviceList = document.getElementById('serviceListNew');
         const serviceHidden = document.getElementById('serviceHiddenNew');
+        const amountInput = document.getElementById('amount');
         const selectedServices = [];
 
         function syncContactFromCustomer() {
@@ -1174,11 +1198,16 @@ app.get('/gestionale/lavori/new', (req, res) => {
           serviceList.innerHTML = selectedServices.length
             ? selectedServices.map((id) => {
               const srv = servicesData.find((s) => Number(s.id) === Number(id));
-              const label = srv ? srv.name : ('Servizio #' + id);
+              const label = srv ? (srv.name + ' (€ ' + Number(srv.price || 0).toFixed(2) + ')') : ('Servizio #' + id);
               return '<div class="selected-service-item"><span>' + escText(label) + '</span><button type="button" class="danger-btn ghost js-remove-service" data-id="' + id + '">-</button></div>';
             }).join('')
             : '<p class="muted">Nessun servizio aggiunto.</p>';
           serviceHidden.innerHTML = selectedServices.map((id) => '<input type="hidden" name="serviceIds" value="' + id + '" />').join('');
+          const total = selectedServices.reduce((sum, id) => {
+            const srv = servicesData.find((s) => Number(s.id) === Number(id));
+            return sum + Number(srv?.price || 0);
+          }, 0);
+          if (amountInput) amountInput.value = total.toFixed(2);
           serviceList.querySelectorAll('.js-remove-service').forEach((btn) => {
             btn.addEventListener('click', () => {
               const id = Number(btn.getAttribute('data-id') || 0);
@@ -1248,6 +1277,7 @@ app.post('/gestionale/lavori/new', (req, res) => {
   const status = normalizeJobStatus(req.body.status);
   const description = (req.body.description || '').trim();
   const serviceIds = parseServiceIdsFromBody(req.body);
+  const servicesTotal = computeServicesTotalForJob(serviceIds, store.services);
   if (!title || !customerId) {
     return res.redirect('/gestionale/lavori/new');
   }
@@ -1273,7 +1303,7 @@ app.post('/gestionale/lavori/new', (req, res) => {
     productDiscount: Number(req.body.productDiscount || 0),
     productTotal: Number(req.body.productTotal || 0),
     dueDate: (req.body.dueDate || '').trim(),
-    amount: Number(req.body.amount || 0),
+    amount: serviceIds.length ? servicesTotal : Number(req.body.amount || 0),
     paymentStatus: 'pending',
     status,
     createdAt: new Date().toISOString(),
@@ -1281,6 +1311,7 @@ app.post('/gestionale/lavori/new', (req, res) => {
   };
   store.jobs.unshift(newJob);
   upsertDebtItemFromJob(store, newJob);
+  syncJobServiceSubscriptions(store, newJob);
 
   writeStore(store);
   res.redirect('/gestionale/lavori');
@@ -1301,9 +1332,9 @@ app.get('/gestionale/lavori/:id', (req, res) => {
     .map((c) => `<option value="${c.id}" ${Number(c.id) === Number(job.customerId || 0) ? 'selected' : ''}>${esc(c.company || `${c.firstName} ${c.lastName}`)}</option>`)
     .join('');
   const serviceOptions = store.services
-    .map((s) => `<option value="${s.id}">${esc(s.name)}</option>`)
+    .map((s) => `<option value="${s.id}">${esc(s.name)} (€ ${Number(s.price || 0).toFixed(2)})</option>`)
     .join('');
-  const servicesForUi = store.services.map((s) => ({ id: Number(s.id), name: s.name || '' }));
+  const servicesForUi = store.services.map((s) => ({ id: Number(s.id), name: s.name || '', price: Number(s.price || 0) }));
   const servicesJson = JSON.stringify(servicesForUi)
     .replace(/</g, '\\u003c')
     .replace(/>/g, '\\u003e')
@@ -1311,12 +1342,14 @@ app.get('/gestionale/lavori/:id', (req, res) => {
   const selectedServiceIdsJson = JSON.stringify(jobServiceIds);
   const pipelineStage = normalizeJobStatus(job.status);
   const startDate = (job.startDate || job.createdAt || '').slice(0, 10);
-  const relatedServicesSubs = customerSubs.filter((s) => jobServiceIds.includes(Number(s.serviceId || 0)));
-  const activityWorkItems = buildCustomerWorkItems([job], relatedServicesSubs, store.services, store);
+  const relatedServicesSubs = customerSubs.filter((s) => Number(s.jobId || 0) === Number(job.id));
+  const legacyRelatedServicesSubs = relatedServicesSubs.length
+    ? relatedServicesSubs
+    : customerSubs.filter((s) => !s.jobId && jobServiceIds.includes(Number(s.serviceId || 0)));
+  const activityWorkItems = buildCustomerWorkItems([], legacyRelatedServicesSubs, store.services, store);
   const activityTotalDue = computeGrossTotalFromItems(activityWorkItems);
   const activityPaidTotal = computePaidTotalFromItems(activityWorkItems, store);
   const activityRemaining = Math.max(0, activityTotalDue - activityPaidTotal);
-  const quickPaymentLabel = job.paymentStatus === 'paid' ? 'Pagato' : 'In attesa';
   const customerName = customer ? (customer.company || `${customer.firstName} ${customer.lastName}`) : 'Cliente non associato';
   const body = `
     <section class="crm-header card">
@@ -1343,7 +1376,7 @@ app.get('/gestionale/lavori/:id', (req, res) => {
       <form method="post" action="/gestionale/lavori/${id}/status" class="row-between">
         <div>
           <strong>${esc(job.title || 'Attivita')}</strong>
-          <div class="muted">Stato attuale: ${esc(labelJobStatus(job.status))} · Pagamento: ${quickPaymentLabel}</div>
+          <div class="muted">Stato attuale: ${esc(labelJobStatus(job.status))}</div>
         </div>
         <div class="inline-actions">
           <select name="status">
@@ -1369,7 +1402,6 @@ app.get('/gestionale/lavori/:id', (req, res) => {
         <p>Fine prevista: ${esc(formatDateItShort(job.dueDate || '-'))}</p>
         <p>Importo: € ${Number(job.amount || 0).toFixed(2)}</p>
         <p>Servizi: ${esc(jobServiceNames.length ? jobServiceNames.join(', ') : '-')}</p>
-        <p>Pagamento: ${quickPaymentLabel}</p>
       </aside>
 
       <section class="card crm-right">
@@ -1422,14 +1454,7 @@ app.get('/gestionale/lavori/:id', (req, res) => {
 
             <div class="form-grid">
               <label for="jobAmount">Importo totale</label>
-              <input id="jobAmount" type="number" name="amount" step="0.01" min="0" value="${Number(job.amount || 0).toFixed(2)}" />
-            </div>
-            <div class="form-grid">
-              <label for="jobPaymentStatus">Stato pagamento</label>
-              <select id="jobPaymentStatus" name="paymentStatus">
-                <option value="pending" ${job.paymentStatus !== 'paid' ? 'selected' : ''}>In attesa</option>
-                <option value="paid" ${job.paymentStatus === 'paid' ? 'selected' : ''}>Pagato</option>
-              </select>
+              <input id="jobAmount" type="number" name="amount" step="0.01" min="0" value="${Number(job.amount || 0).toFixed(2)}" readonly />
             </div>
 
             <div class="form-grid" style="grid-column:1 / -1">
@@ -1463,7 +1488,6 @@ app.get('/gestionale/lavori/:id', (req, res) => {
             <input type="hidden" name="startDate" value="${esc(startDate)}" />
             <input type="hidden" name="dueDate" value="${esc((job.dueDate || '').slice(0, 10))}" />
             <input type="hidden" name="amount" value="${Number(job.amount || 0)}" />
-            <input type="hidden" name="paymentStatus" value="${esc(job.paymentStatus || 'pending')}" />
             <textarea name="documentsText" rows="8" placeholder="Inserisci link documenti o riferimenti, una riga per voce">${esc(job.documentsText || '')}</textarea>
             <button type="submit">Salva documenti</button>
           </form>
@@ -1507,6 +1531,7 @@ app.get('/gestionale/lavori/:id', (req, res) => {
         const serviceAddBtn = document.getElementById('serviceAddBtnEdit');
         const serviceList = document.getElementById('serviceListEdit');
         const serviceHidden = document.getElementById('serviceHiddenEdit');
+        const amountInput = document.getElementById('jobAmount');
 
         document.querySelectorAll('.js-note-edit').forEach((btn) => {
           btn.addEventListener('click', () => {
@@ -1533,11 +1558,16 @@ app.get('/gestionale/lavori/:id', (req, res) => {
           serviceList.innerHTML = selectedServices.length
             ? selectedServices.map((id) => {
               const srv = servicesData.find((s) => Number(s.id) === Number(id));
-              const label = srv ? srv.name : ('Servizio #' + id);
+              const label = srv ? (srv.name + ' (€ ' + Number(srv.price || 0).toFixed(2) + ')') : ('Servizio #' + id);
               return '<div class="selected-service-item"><span>' + escText(label) + '</span><button type="button" class="danger-btn ghost js-remove-service" data-id="' + id + '">-</button></div>';
             }).join('')
             : '<p class="muted">Nessun servizio aggiunto.</p>';
           serviceHidden.innerHTML = selectedServices.map((id) => '<input type="hidden" name="serviceIds" value="' + id + '" />').join('');
+          const total = selectedServices.reduce((sum, id) => {
+            const srv = servicesData.find((s) => Number(s.id) === Number(id));
+            return sum + Number(srv?.price || 0);
+          }, 0);
+          if (amountInput) amountInput.value = total.toFixed(2);
           serviceList.querySelectorAll('.js-remove-service').forEach((btn) => {
             btn.addEventListener('click', () => {
               const id = Number(btn.getAttribute('data-id') || 0);
@@ -1579,9 +1609,14 @@ app.post('/gestionale/lavori/:id/update', (req, res) => {
   job.status = normalizeJobStatus(req.body.status);
   job.startDate = (req.body.startDate || '').trim();
   job.dueDate = (req.body.dueDate || '').trim();
+  const servicesTotal = computeServicesTotalForJob(serviceIds, store.services);
   const amount = Number(req.body.amount || 0);
-  if (Number.isFinite(amount)) job.amount = amount;
-  job.paymentStatus = req.body.paymentStatus === 'paid' ? 'paid' : 'pending';
+  if (serviceIds.length) {
+    job.amount = servicesTotal;
+  } else if (Number.isFinite(amount)) {
+    job.amount = amount;
+  }
+  job.paymentStatus = 'pending';
   if (typeof req.body.description === 'string') {
     job.description = req.body.description.trim();
   }
@@ -1601,6 +1636,7 @@ app.post('/gestionale/lavori/:id/update', (req, res) => {
   }
   job.updatedAt = new Date().toISOString();
   upsertDebtItemFromJob(store, job);
+  syncJobServiceSubscriptions(store, job);
 
   writeStore(store);
   return res.redirect(`/gestionale/lavori/${id}`);
@@ -1681,6 +1717,15 @@ app.post('/gestionale/lavori/:id/delete', (req, res) => {
   const store = readStore();
   const id = Number(req.params.id || 0);
   store.jobs = store.jobs.filter((j) => Number(j.id) !== id);
+  const jobSubs = store.subscriptions.filter((s) => Number(s.jobId || 0) === id);
+  for (const sub of jobSubs) {
+    const subDebt = getDebtItemBySource(store, 'subscription', sub.id);
+    if (subDebt) {
+      store.paymentEntries = store.paymentEntries.filter((p) => Number(p.debtItemId || 0) !== Number(subDebt.id));
+      store.debtItems = store.debtItems.filter((d) => Number(d.id) !== Number(subDebt.id));
+    }
+  }
+  store.subscriptions = store.subscriptions.filter((s) => Number(s.jobId || 0) !== id);
   const debt = getDebtItemBySource(store, 'job', id);
   if (debt) {
     store.paymentEntries = store.paymentEntries.filter((p) => Number(p.debtItemId || 0) !== Number(debt.id));
@@ -1924,6 +1969,11 @@ function normalizeStore(store) {
   if (!Array.isArray(s.debtItems)) s.debtItems = [];
   if (!Array.isArray(s.paymentEntries)) s.paymentEntries = [];
 
+  for (const service of s.services) {
+    if (!Array.isArray(service.priceHistory)) service.priceHistory = [];
+    if (typeof service.price === 'undefined') service.price = 0;
+  }
+
   for (const sub of s.subscriptions) {
     if (!sub.customerId) {
       let customer = s.customers.find((c) => String(c.email || '').toLowerCase() === String(sub.email || '').toLowerCase());
@@ -1954,6 +2004,7 @@ function normalizeStore(store) {
     if (!sub.billingInterval) sub.billingInterval = 'annual';
     if (!sub.paymentStatus) sub.paymentStatus = 'pending';
     if (typeof sub.priceAtSale === 'undefined') sub.priceAtSale = 0;
+    if (!sub.jobId) sub.jobId = null;
   }
 
   for (const job of s.jobs) {
@@ -2891,6 +2942,7 @@ function createServiceFromRequest(store, body) {
     name,
     description: (body.description || '').trim(),
     price: Number(body.price || 0),
+    priceHistory: [],
     billingType: body.billingType === 'subscription' ? 'subscription' : 'one_time',
     billingInterval: normalizeInterval(body.billingInterval || 'annual'),
     active: true,
@@ -2937,6 +2989,79 @@ function computeRenewalDate(startDate, interval) {
   return d.toISOString().slice(0, 10);
 }
 
+function computeServicesTotalForJob(serviceIds, services) {
+  return sanitizeServiceIds(serviceIds).reduce((sum, sid) => {
+    const service = services.find((s) => Number(s.id) === Number(sid));
+    return sum + Number(service?.price || 0);
+  }, 0);
+}
+
+function syncJobServiceSubscriptions(store, job) {
+  const serviceIds = sanitizeServiceIds(job.serviceIds || []);
+  const jobSubs = store.subscriptions.filter((s) => Number(s.jobId || 0) === Number(job.id));
+  const now = new Date().toISOString();
+  const purchaseDate = (job.startDate || String(job.createdAt || '').slice(0, 10) || new Date().toISOString().slice(0, 10));
+
+  for (const sid of serviceIds) {
+    const service = store.services.find((s) => Number(s.id) === Number(sid));
+    if (!service) continue;
+    let sub = jobSubs.find((s) => Number(s.serviceId || 0) === Number(sid));
+    if (!sub) {
+      const customer = store.customers.find((c) => Number(c.id) === Number(job.customerId || 0));
+      sub = {
+        id: nextId(store.subscriptions),
+        customerId: Number(job.customerId || 0) || null,
+        jobId: Number(job.id),
+        wpUserId: customer?.wpUserId || null,
+        customerName: customer ? `${customer.firstName || ''} ${customer.lastName || ''}`.trim() : '',
+        company: customer?.company || '',
+        email: customer?.email || '',
+        serviceId: sid,
+        purchaseDate,
+        renewalDate: '',
+        billingType: service.billingType === 'subscription' ? 'subscription' : 'one_time',
+        billingInterval: normalizeInterval(service.billingInterval || 'annual'),
+        priceAtSale: Number(service.price || 0),
+        status: 'active',
+        paymentStatus: 'pending',
+        notes: `Servizio collegato all'attivita #${job.id}`,
+        lastReminderSent: '',
+        createdAt: now,
+        updatedAt: now
+      };
+      if (sub.billingType === 'subscription') {
+        sub.renewalDate = computeRenewalDate(purchaseDate, sub.billingInterval);
+      }
+      store.subscriptions.unshift(sub);
+    } else {
+      sub.customerId = Number(job.customerId || 0) || sub.customerId || null;
+      sub.jobId = Number(job.id);
+      sub.updatedAt = now;
+      if (sub.status === 'cancelled') sub.status = 'active';
+    }
+    upsertDebtItemFromSubscription(store, sub);
+  }
+
+  for (const sub of jobSubs) {
+    if (serviceIds.includes(Number(sub.serviceId || 0))) continue;
+    const debt = getDebtItemBySource(store, 'subscription', sub.id);
+    const hasPayments = debt
+      ? store.paymentEntries.some((p) => Number(p.debtItemId || 0) === Number(debt.id))
+      : false;
+    if (hasPayments) {
+      sub.status = 'cancelled';
+      sub.updatedAt = now;
+      upsertDebtItemFromSubscription(store, sub);
+      continue;
+    }
+    if (debt) {
+      store.paymentEntries = store.paymentEntries.filter((p) => Number(p.debtItemId || 0) !== Number(debt.id));
+      store.debtItems = store.debtItems.filter((d) => Number(d.id) !== Number(debt.id));
+    }
+    store.subscriptions = store.subscriptions.filter((s) => Number(s.id) !== Number(sub.id));
+  }
+}
+
 function randomToken() {
   return crypto.randomBytes(24).toString('hex');
 }
@@ -2981,9 +3106,21 @@ function maybeSendInviteEmail(customer, invite, inviteUrl) {
 function renderServicesTable(services) {
   if (!services.length) return '<p>Nessun servizio in catalogo.</p>';
   const rows = services
-    .map((s) => `<tr><td>${s.id}</td><td>${esc(s.name)}</td><td>€ ${Number(s.price || 0).toFixed(2)}</td><td>${esc(labelBilling(s.billingType, s.billingInterval))}</td></tr>`)
+    .map((s) => `<tr>
+      <td>${s.id}</td>
+      <td>${esc(s.name)}</td>
+      <td>€ ${Number(s.price || 0).toFixed(2)}</td>
+      <td>${esc(labelBilling(s.billingType, s.billingInterval))}</td>
+      <td>
+        <form method="post" action="/gestionale/servizi/${s.id}/price" class="inline-actions">
+          <input type="number" name="price" step="0.01" min="0" value="${Number(s.price || 0).toFixed(2)}" />
+          <input type="text" name="note" placeholder="Motivo variazione (opzionale)" />
+          <button type="submit">Aggiorna prezzo</button>
+        </form>
+      </td>
+    </tr>`)
     .join('');
-  return `<table class="tbl"><thead><tr><th>ID</th><th>Servizio</th><th>Prezzo</th><th>Tipo</th></tr></thead><tbody>${rows}</tbody></table>`;
+  return `<table class="tbl"><thead><tr><th>ID</th><th>Servizio</th><th>Prezzo</th><th>Tipo</th><th>Aggiorna prezzo</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
 function renderCustomersTable(store, customersOverride = null) {
