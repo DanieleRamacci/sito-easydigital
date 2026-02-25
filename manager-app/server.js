@@ -549,16 +549,9 @@ app.get('/gestionale/clienti/:id', (req, res) => {
   const pipelineStage = latestJob ? normalizeJobStatus(latestJob.status) : 'qualificazione_preventivo';
   const totalValue = customerSubs.reduce((sum, s) => sum + Number(s.priceAtSale || 0), 0);
   const customerNotes = Array.isArray(customer.notes) ? [...customer.notes].sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || ''))) : [];
-  const customerPayments = Array.isArray(customer.payments) ? customer.payments : [];
-  const totalDue = computeOutstandingTotalFromItems(workItems);
-  const paidTotal = customerPayments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
+  const totalDue = computeGrossTotalFromItems(workItems);
+  const paidTotal = computePaidTotalFromItems(workItems, store);
   const remaining = Math.max(0, totalDue - paidTotal);
-  const paymentsRows = customerPayments.length
-    ? customerPayments
-      .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')))
-      .map((p) => `<tr><td>${esc(formatDateItShort(p.date || '-'))}</td><td>€ ${Number(p.amount || 0).toFixed(2)}</td><td>${esc(p.note || '-')}</td></tr>`)
-      .join('')
-    : '<tr><td colspan="3" class="muted">Nessun versamento registrato.</td></tr>';
   const contacts = Array.isArray(customer.crmContacts) ? customer.crmContacts : [];
   const contactsList = contacts.length
     ? contacts.map((c) => `<li class="contact-item">
@@ -676,8 +669,16 @@ app.get('/gestionale/clienti/:id', (req, res) => {
             <a class="btn-link" href="/gestionale/lavori/new?customerId=${id}">+ Crea nuova attivita</a>
           </section>
           <section class="card">
+            <h2>Gestione versamenti cliente</h2>
+            <div class="kpi-grid">
+              ${kpi('Totale dovuto', `€ ${totalDue.toFixed(2)}`)}
+              ${kpi('Versato', `€ ${paidTotal.toFixed(2)}`)}
+              ${kpi('Residuo', `€ ${remaining.toFixed(2)}`)}
+            </div>
+          </section>
+          <section class="card">
             <h2>Associa servizio direttamente al cliente</h2>
-            <p class="muted">Questa sezione collega servizi o abbonamenti al cliente, indipendentemente da una singola attivita.</p>
+            <p class="muted">Collega servizi o abbonamenti al cliente, indipendentemente da una singola attivita.</p>
             <form method="post" action="/gestionale/clienti/${id}/assign" class="form-grid two-col">
               <select name="serviceId">
                 <option value="">Aggiungi dalla lista o crea nuovo</option>
@@ -725,28 +726,15 @@ app.get('/gestionale/clienti/:id', (req, res) => {
             <div class="row-between">
               <h2>Storico attivita e servizi cliente</h2>
             </div>
-            ${renderCustomerWorkItemsTable(workItems)}
+            ${renderCustomerWorkItemsTable(workItems, store, { scopeLabel: 'cliente' })}
           </section>
         </div>
 
         <div class="crm-tab-panel" data-panel="pagamenti">
           <section class="card">
-            <h2>Gestione versamenti cliente</h2>
-            <div class="kpi-grid">
-              ${kpi('Totale dovuto', `€ ${totalDue.toFixed(2)}`)}
-              ${kpi('Versato', `€ ${paidTotal.toFixed(2)}`)}
-              ${kpi('Residuo', `€ ${remaining.toFixed(2)}`)}
-            </div>
-            <form method="post" action="/gestionale/clienti/${id}/payments/new" class="form-grid two-col" style="margin-top:12px">
-              <input type="date" name="date" required />
-              <input type="number" name="amount" step="0.01" min="0.01" placeholder="Importo versato" required />
-              <input type="text" name="note" placeholder="Nota versamento (opzionale)" />
-              <button type="submit">Registra versamento</button>
-            </form>
-            <table class="tbl" style="margin-top:12px">
-              <thead><tr><th>Data pagamento</th><th>Importo</th><th>Note</th></tr></thead>
-              <tbody>${paymentsRows}</tbody>
-            </table>
+            <h2>Pagamenti per voce servizio/attivita</h2>
+            <p class="muted">Segna pagato/non pagato o registra acconti. Ogni acconto viene salvato nello storico della voce.</p>
+            ${renderCustomerWorkItemsTable(workItems, store, { scopeLabel: 'cliente' })}
           </section>
         </div>
 
@@ -1309,7 +1297,6 @@ app.get('/gestionale/lavori/:id', (req, res) => {
   const jobServiceIds = getJobServiceIds(job);
   const jobServiceNames = getJobServiceNames(job, store.services);
   const customerSubs = store.subscriptions.filter((s) => Number(s.customerId || 0) === Number(job.customerId || 0));
-  const relatedRecurring = customerSubs.filter((s) => s.billingType === 'subscription');
   const customerOptions = store.customers
     .map((c) => `<option value="${c.id}" ${Number(c.id) === Number(job.customerId || 0) ? 'selected' : ''}>${esc(c.company || `${c.firstName} ${c.lastName}`)}</option>`)
     .join('');
@@ -1322,19 +1309,13 @@ app.get('/gestionale/lavori/:id', (req, res) => {
     .replace(/>/g, '\\u003e')
     .replace(/&/g, '\\u0026');
   const selectedServiceIdsJson = JSON.stringify(jobServiceIds);
-  const recurringRows = relatedRecurring.length
-    ? relatedRecurring.map((s) => {
-      const srv = store.services.find((x) => Number(x.id) === Number(s.serviceId || 0));
-      return `<tr>
-        <td>${esc(srv ? srv.name : 'Servizio')}</td>
-        <td>${esc(formatDateItShort(s.renewalDate || '-'))}</td>
-        <td>€ ${Number(s.priceAtSale || 0).toFixed(2)}</td>
-        <td>${s.paymentStatus === 'paid' ? 'Pagato' : 'In attesa'}</td>
-      </tr>`;
-    }).join('')
-    : '<tr><td colspan="4" class="muted">Nessun rinnovo ricorrente collegato a questo cliente.</td></tr>';
   const pipelineStage = normalizeJobStatus(job.status);
   const startDate = (job.startDate || job.createdAt || '').slice(0, 10);
+  const relatedServicesSubs = customerSubs.filter((s) => jobServiceIds.includes(Number(s.serviceId || 0)));
+  const activityWorkItems = buildCustomerWorkItems([job], relatedServicesSubs, store.services, store);
+  const activityTotalDue = computeGrossTotalFromItems(activityWorkItems);
+  const activityPaidTotal = computePaidTotalFromItems(activityWorkItems, store);
+  const activityRemaining = Math.max(0, activityTotalDue - activityPaidTotal);
   const quickPaymentLabel = job.paymentStatus === 'paid' ? 'Pagato' : 'In attesa';
   const customerName = customer ? (customer.company || `${customer.firstName} ${customer.lastName}`) : 'Cliente non associato';
   const body = `
@@ -1490,21 +1471,16 @@ app.get('/gestionale/lavori/:id', (req, res) => {
 
         <div class="crm-tab-panel" data-panel="lavoro-debiti">
           <section class="card">
-            <h2>Pagamento lavoro</h2>
-            <form method="post" action="/gestionale/lavori/${id}/payment" class="inline-actions">
-              <select name="paymentStatus">
-                <option value="pending" ${job.paymentStatus !== 'paid' ? 'selected' : ''}>In attesa</option>
-                <option value="paid" ${job.paymentStatus === 'paid' ? 'selected' : ''}>Pagato</option>
-              </select>
-              <button type="submit">Salva pagamento lavoro</button>
-            </form>
+            <h2>Gestione versamenti attivita</h2>
+            <div class="kpi-grid">
+              ${kpi('Totale dovuto', `€ ${activityTotalDue.toFixed(2)}`)}
+              ${kpi('Versato', `€ ${activityPaidTotal.toFixed(2)}`)}
+              ${kpi('Residuo', `€ ${activityRemaining.toFixed(2)}`)}
+            </div>
           </section>
           <section class="card">
-            <h2>Rinnovi ricorrenti collegati al cliente</h2>
-            <table class="tbl">
-              <thead><tr><th>Servizio</th><th>Scadenza</th><th>Importo</th><th>Pagamento</th></tr></thead>
-              <tbody>${recurringRows}</tbody>
-            </table>
+            <h2>Storico attivita e servizi collegati</h2>
+            ${renderCustomerWorkItemsTable(activityWorkItems, store, { scopeLabel: 'attivita' })}
           </section>
         </div>
       </section>
@@ -2242,19 +2218,42 @@ function buildCustomerWorkItems(jobs, subs, services, store = null) {
   return [...jobItems, ...subItems].sort((a, b) => String(a.dueDate || '').localeCompare(String(b.dueDate || '')));
 }
 
-function computeOutstandingTotalFromItems(items) {
+function computeGrossTotalFromItems(items) {
   return items.reduce((sum, item) => {
-    if (item.paymentStatus === 'paid') return sum;
     if (item.kind === 'job' && item.statusKey === 'chiusa_persa') return sum;
     if (item.kind === 'subscription' && item.statusKey === 'cancelled') return sum;
-    if (typeof item.outstanding === 'number') return sum + Number(item.outstanding || 0);
     return sum + Number(item.amount || 0);
   }, 0);
 }
 
-function renderCustomerWorkItemsTable(items) {
+function computePaidTotalFromItems(items, store) {
+  return items.reduce((sum, item) => {
+    if (!item.debtId) {
+      return sum + (item.paymentStatus === 'paid' ? Number(item.amount || 0) : 0);
+    }
+    const debt = store.debtItems.find((d) => Number(d.id) === Number(item.debtId));
+    return sum + Number(debt?.amountPaid || 0);
+  }, 0);
+}
+
+function buildItemPaymentHistory(item, store) {
+  if (!item.debtId) return [];
+  return store.paymentEntries
+    .filter((p) => Number(p.debtItemId || 0) === Number(item.debtId))
+    .sort((a, b) => String(b.date || b.createdAt || '').localeCompare(String(a.date || a.createdAt || '')));
+}
+
+function renderCustomerWorkItemsTable(items, store, options = {}) {
   if (!items.length) return '<p>Nessun lavoro o servizio associato.</p>';
-  const rows = items.map((item) => {
+  const scopeLabel = options.scopeLabel || 'cliente';
+  const openItems = items.filter((item) => item.paymentStatus !== 'paid');
+  const paidItems = items.filter((item) => item.paymentStatus === 'paid');
+
+  const renderRows = (rowsData) => rowsData.map((item) => {
+    const history = buildItemPaymentHistory(item, store);
+    const paidForItem = item.debtId
+      ? Number(store.debtItems.find((d) => Number(d.id) === Number(item.debtId))?.amountPaid || 0)
+      : (item.paymentStatus === 'paid' ? Number(item.amount || 0) : 0);
     const payStatusForm = item.kind === 'job'
       ? `<form method="post" action="/gestionale/lavori/${item.id}/payment" class="inline-actions">
           <select name="paymentStatus">
@@ -2283,18 +2282,46 @@ function renderCustomerWorkItemsTable(items) {
       ? `<a class="btn-link" href="/gestionale/lavori/${item.id}">Apri scheda</a>`
       : '';
 
+    const historyHtml = history.length
+      ? `<div class="payment-history">
+          ${history.map((p) => `<div class="payment-history-row">↳ ${esc(formatDateItShort(p.date || String(p.createdAt || '').slice(0, 10) || '-'))} · € ${Number(p.amount || 0).toFixed(2)} ${p.note ? `· ${esc(p.note)}` : ''}</div>`).join('')}
+        </div>`
+      : '<div class="payment-history muted">Nessun acconto registrato.</div>';
+
     return `<tr>
       <td>${esc(item.label)}</td>
       <td>${esc(item.typeLabel)}</td>
       <td>${esc(item.statusLabel)}</td>
       <td>${esc(formatDateItShort(item.dueDate || '-'))}</td>
       <td>€ ${Number(item.amount || 0).toFixed(2)}</td>
+      <td>€ ${paidForItem.toFixed(2)}</td>
       <td>€ ${Number(item.outstanding || 0).toFixed(2)}</td>
-      <td><div class="inline-actions">${payStatusForm}${partialPayForm}${openLink}</div></td>
+      <td>
+        <div class="inline-actions">${payStatusForm}${partialPayForm}${openLink}</div>
+        ${historyHtml}
+      </td>
     </tr>`;
   }).join('');
 
-  return `<table class="tbl"><thead><tr><th>Voce</th><th>Tipo</th><th>Stato</th><th>Data</th><th>Importo</th><th>Residuo</th><th>Pagamento</th></tr></thead><tbody>${rows}</tbody></table>`;
+  const openRows = renderRows(openItems);
+  const paidRows = renderRows(paidItems);
+
+  return `
+    <h3>Voci attive (${openItems.length}) · ambito ${esc(scopeLabel)}</h3>
+    <table class="tbl">
+      <thead><tr><th>Voce</th><th>Tipo</th><th>Stato</th><th>Data</th><th>Importo</th><th>Versato</th><th>Residuo</th><th>Pagamento</th></tr></thead>
+      <tbody>${openRows || '<tr><td colspan="8" class="muted">Nessuna voce attiva.</td></tr>'}</tbody>
+    </table>
+    <details class="card" style="margin-top:12px">
+      <summary><strong>Voci pagate (${paidItems.length})</strong></summary>
+      <div style="margin-top:10px">
+        <table class="tbl">
+          <thead><tr><th>Voce</th><th>Tipo</th><th>Stato</th><th>Data</th><th>Importo</th><th>Versato</th><th>Residuo</th><th>Pagamento</th></tr></thead>
+          <tbody>${paidRows || '<tr><td colspan="8" class="muted">Nessuna voce pagata.</td></tr>'}</tbody>
+        </table>
+      </div>
+    </details>
+  `;
 }
 
 function kpi(label, value) {
@@ -3559,6 +3586,8 @@ function baseStyles() {
     .inline-actions { display:flex; gap:8px; align-items:center; flex-wrap:nowrap; }
     .selected-service-list { display:grid; gap:8px; margin-top:8px; }
     .selected-service-item { display:flex; justify-content:space-between; align-items:center; gap:8px; border:1px solid var(--line); border-radius:8px; padding:8px 10px; background:#f8fbf9; }
+    .payment-history { margin-top:8px; display:grid; gap:4px; }
+    .payment-history-row { font-size:.84rem; color:#334155; padding-left:6px; border-left:2px solid #d1fae5; }
     .affare-grid { display:grid; gap:10px; grid-template-columns: 180px minmax(0, 1fr); align-items:center; }
     .inline-create { margin-top:8px; border:1px solid #bbf7d0; border-radius:8px; padding:8px 10px; background:#f0fdf4; }
     .inline-create summary { cursor:pointer; color:#166534; font-weight:600; }
