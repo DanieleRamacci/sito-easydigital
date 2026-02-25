@@ -656,8 +656,16 @@ app.get('/gestionale/clienti/:id', (req, res) => {
         </div>
 
         <div class="crm-tab-panel is-active" data-panel="lavori">
+          <section class="card row-between">
+            <div>
+              <h2>Attivita cliente</h2>
+              <p class="muted">La creazione avviene in un flusso dedicato con cliente gia selezionato.</p>
+            </div>
+            <a class="btn-link" href="/gestionale/lavori/new?customerId=${id}">+ Crea nuova attivita</a>
+          </section>
           <section class="card">
-            <h2>Aggiungi servizio / abbonamento</h2>
+            <h2>Associa servizio direttamente al cliente</h2>
+            <p class="muted">Questa sezione collega servizi o abbonamenti al cliente, indipendentemente da una singola attivita.</p>
             <form method="post" action="/gestionale/clienti/${id}/assign" class="form-grid two-col">
               <select name="serviceId">
                 <option value="">Aggiungi dalla lista o crea nuovo</option>
@@ -703,8 +711,7 @@ app.get('/gestionale/clienti/:id', (req, res) => {
           </section>
           <section class="card">
             <div class="row-between">
-              <h2>Richieste e servizi del cliente</h2>
-              <a class="btn-link" href="/gestionale/lavori/new?customerId=${id}">+ Nuovo lavoro una tantum</a>
+              <h2>Storico attivita e servizi cliente</h2>
             </div>
             ${renderCustomerWorkItemsTable(workItems)}
           </section>
@@ -1077,7 +1084,12 @@ app.get('/gestionale/lavori/new', (req, res) => {
         </div>
 
         <div class="row-between">
-          <select name="serviceId"><option value="">Servizio collegato (opzionale)</option>${serviceOptions}</select>
+          <div class="form-grid" style="width:100%">
+            <label for="serviceIds">Servizi collegati (uno o piu)</label>
+            <select id="serviceIds" name="serviceIds" multiple size="5">
+              ${serviceOptions}
+            </select>
+          </div>
           <button type="submit">Crea Affare</button>
         </div>
       </form>
@@ -1174,6 +1186,7 @@ app.post('/gestionale/lavori/new', (req, res) => {
   const title = (req.body.title || '').trim();
   const status = normalizeJobStatus(req.body.status);
   const description = (req.body.description || '').trim();
+  const serviceIds = parseServiceIdsFromBody(req.body);
   if (!title || !customerId) {
     return res.redirect('/gestionale/lavori/new');
   }
@@ -1182,7 +1195,8 @@ app.post('/gestionale/lavori/new', (req, res) => {
     id: nextId(store.jobs),
     title,
     customerId,
-    serviceId: Number(req.body.serviceId || 0) || null,
+    serviceIds,
+    serviceId: Number(serviceIds[0] || 0) || null,
     notes: description,
     description,
     contactName: (req.body.contactName || '').trim(),
@@ -1219,14 +1233,15 @@ app.get('/gestionale/lavori/:id', (req, res) => {
     return res.status(404).send(renderPublicPage('Commessa non trovata', '<p>Commessa non trovata.</p>'));
   }
   const customer = store.customers.find((c) => Number(c.id) === Number(job.customerId || 0));
-  const service = store.services.find((s) => Number(s.id) === Number(job.serviceId || 0));
+  const jobServiceIds = getJobServiceIds(job);
+  const jobServiceNames = getJobServiceNames(job, store.services);
   const customerSubs = store.subscriptions.filter((s) => Number(s.customerId || 0) === Number(job.customerId || 0));
   const relatedRecurring = customerSubs.filter((s) => s.billingType === 'subscription');
   const customerOptions = store.customers
     .map((c) => `<option value="${c.id}" ${Number(c.id) === Number(job.customerId || 0) ? 'selected' : ''}>${esc(c.company || `${c.firstName} ${c.lastName}`)}</option>`)
     .join('');
-  const serviceOptions = ['<option value="">Nessun servizio collegato</option>']
-    .concat(store.services.map((s) => `<option value="${s.id}" ${Number(s.id) === Number(job.serviceId || 0) ? 'selected' : ''}>${esc(s.name)}</option>`))
+  const serviceOptions = store.services
+    .map((s) => `<option value="${s.id}" ${jobServiceIds.includes(Number(s.id)) ? 'selected' : ''}>${esc(s.name)}</option>`)
     .join('');
   const recurringRows = relatedRecurring.length
     ? relatedRecurring.map((s) => {
@@ -1293,65 +1308,89 @@ app.get('/gestionale/lavori/:id', (req, res) => {
         <p>Apertura: ${esc(formatDateItShort(startDate || '-'))}</p>
         <p>Fine prevista: ${esc(formatDateItShort(job.dueDate || '-'))}</p>
         <p>Importo: € ${Number(job.amount || 0).toFixed(2)}</p>
-        <p>Servizio: ${esc(service ? service.name : '-')}</p>
+        <p>Servizi: ${esc(jobServiceNames.length ? jobServiceNames.join(', ') : '-')}</p>
         <p>Pagamento: ${quickPaymentLabel}</p>
       </aside>
 
       <section class="card crm-right">
         <div class="crm-tabs">
           <button class="crm-tab-btn is-active" data-tab="lavoro-dati">Dati lavoro</button>
-          <button class="crm-tab-btn" data-tab="lavoro-note">Note</button>
+          <button class="crm-tab-btn" data-tab="lavoro-timeline">Sequenza temporale</button>
+          <button class="crm-tab-btn" data-tab="lavoro-note">Note diario</button>
           <button class="crm-tab-btn" data-tab="lavoro-documenti">Documenti</button>
           <button class="crm-tab-btn" data-tab="lavoro-debiti">Debiti collegati</button>
         </div>
 
         <div class="crm-tab-panel is-active" data-panel="lavoro-dati">
           <form method="post" action="/gestionale/lavori/${id}/update" class="form-grid two-col">
-            <input type="text" name="title" placeholder="Nome lavoro" value="${esc(job.title || '')}" required />
-            <select name="customerId" required>${customerOptions}</select>
+            <div class="form-grid">
+              <label for="jobTitle">Nome attivita</label>
+              <input id="jobTitle" type="text" name="title" value="${esc(job.title || '')}" required />
+            </div>
+            <div class="form-grid">
+              <label for="jobCustomer">Cliente associato</label>
+              <select id="jobCustomer" name="customerId" required>${customerOptions}</select>
+            </div>
 
-            <select name="serviceId">${serviceOptions}</select>
-            <select name="status" required>
-              ${JOB_STATUS_OPTIONS.map((s) => `<option value="${s}" ${job.status === s ? 'selected' : ''}>${esc(labelJobStatus(s))}</option>`).join('')}
-            </select>
+            <div class="form-grid">
+              <label for="jobServices">Servizi collegati (uno o piu)</label>
+              <select id="jobServices" name="serviceIds" multiple size="5">${serviceOptions}</select>
+            </div>
+            <div class="form-grid">
+              <label for="jobStatus">Fase attivita</label>
+              <select id="jobStatus" name="status" required>
+                ${JOB_STATUS_OPTIONS.map((s) => `<option value="${s}" ${job.status === s ? 'selected' : ''}>${esc(labelJobStatus(s))}</option>`).join('')}
+              </select>
+            </div>
 
-            <input type="date" name="startDate" value="${esc(startDate)}" />
-            <input type="date" name="dueDate" value="${esc((job.dueDate || '').slice(0, 10))}" />
+            <div class="form-grid">
+              <label for="jobStartDate">Data di inizio</label>
+              <input id="jobStartDate" type="date" name="startDate" value="${esc(startDate)}" />
+            </div>
+            <div class="form-grid">
+              <label for="jobDueDate">Data prevista di conclusione</label>
+              <input id="jobDueDate" type="date" name="dueDate" value="${esc((job.dueDate || '').slice(0, 10))}" />
+            </div>
 
-            <input type="number" name="amount" step="0.01" min="0" value="${Number(job.amount || 0).toFixed(2)}" />
-            <select name="paymentStatus">
-              <option value="pending" ${job.paymentStatus !== 'paid' ? 'selected' : ''}>Pagamento: in attesa</option>
-              <option value="paid" ${job.paymentStatus === 'paid' ? 'selected' : ''}>Pagamento: pagato</option>
-            </select>
+            <div class="form-grid">
+              <label for="jobAmount">Importo totale</label>
+              <input id="jobAmount" type="number" name="amount" step="0.01" min="0" value="${Number(job.amount || 0).toFixed(2)}" />
+            </div>
+            <div class="form-grid">
+              <label for="jobPaymentStatus">Stato pagamento</label>
+              <select id="jobPaymentStatus" name="paymentStatus">
+                <option value="pending" ${job.paymentStatus !== 'paid' ? 'selected' : ''}>In attesa</option>
+                <option value="paid" ${job.paymentStatus === 'paid' ? 'selected' : ''}>Pagato</option>
+              </select>
+            </div>
 
-            <textarea name="description" rows="4" placeholder="Descrizione attivita">${esc(job.description || '')}</textarea>
-            <textarea name="notes" rows="4" placeholder="Note operative">${esc(job.notes || '')}</textarea>
+            <div class="form-grid" style="grid-column:1 / -1">
+              <label for="jobDescription">Descrizione attivita</label>
+              <textarea id="jobDescription" name="description" rows="4" placeholder="Descrizione attivita">${esc(job.description || '')}</textarea>
+            </div>
 
             <button type="submit">Salva modifiche attivita</button>
           </form>
         </div>
 
+        <div class="crm-tab-panel" data-panel="lavoro-timeline">
+          ${renderJobTimeline(job, store.services)}
+        </div>
+
         <div class="crm-tab-panel" data-panel="lavoro-note">
-          <form method="post" action="/gestionale/lavori/${id}/update" class="form-grid">
-            <input type="hidden" name="title" value="${esc(job.title || '')}" />
-            <input type="hidden" name="customerId" value="${Number(job.customerId || 0)}" />
-            <input type="hidden" name="serviceId" value="${Number(job.serviceId || 0)}" />
-            <input type="hidden" name="status" value="${esc(job.status || 'qualificazione_preventivo')}" />
-            <input type="hidden" name="startDate" value="${esc(startDate)}" />
-            <input type="hidden" name="dueDate" value="${esc((job.dueDate || '').slice(0, 10))}" />
-            <input type="hidden" name="amount" value="${Number(job.amount || 0)}" />
-            <input type="hidden" name="paymentStatus" value="${esc(job.paymentStatus || 'pending')}" />
-            <textarea name="description" rows="4" placeholder="Descrizione attivita">${esc(job.description || '')}</textarea>
-            <textarea name="notes" rows="6" placeholder="Note operative">${esc(job.notes || '')}</textarea>
-            <button type="submit">Salva note</button>
+          <form method="post" action="/gestionale/lavori/${id}/notes/new" class="form-grid">
+            <label for="newJobNote">Aggiungi nuova nota</label>
+            <textarea id="newJobNote" name="text" rows="4" placeholder="Scrivi una nota cronologica" required></textarea>
+            <button type="submit">Salva nota</button>
           </form>
+          ${renderJobNotesList(job.notesList || [], id)}
         </div>
 
         <div class="crm-tab-panel" data-panel="lavoro-documenti">
           <form method="post" action="/gestionale/lavori/${id}/update" class="form-grid">
             <input type="hidden" name="title" value="${esc(job.title || '')}" />
             <input type="hidden" name="customerId" value="${Number(job.customerId || 0)}" />
-            <input type="hidden" name="serviceId" value="${Number(job.serviceId || 0)}" />
+            ${jobServiceIds.map((sid) => `<input type="hidden" name="serviceIds" value="${sid}" />`).join('')}
             <input type="hidden" name="status" value="${esc(job.status || 'qualificazione_preventivo')}" />
             <input type="hidden" name="startDate" value="${esc(startDate)}" />
             <input type="hidden" name="dueDate" value="${esc((job.dueDate || '').slice(0, 10))}" />
@@ -1398,6 +1437,23 @@ app.get('/gestionale/lavori/:id', (req, res) => {
             if (panel) panel.classList.add('is-active');
           });
         });
+
+        document.querySelectorAll('.js-note-edit').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            const target = btn.getAttribute('data-target');
+            if (!target) return;
+            const form = document.getElementById(target);
+            if (!form) return;
+            const textarea = form.querySelector('textarea[name="text"]');
+            const saveBtn = form.querySelector('.js-note-save');
+            if (!textarea || !saveBtn) return;
+            textarea.removeAttribute('readonly');
+            textarea.focus();
+            textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+            saveBtn.hidden = false;
+            btn.hidden = true;
+          });
+        });
       })();
     </script>
   `;
@@ -1414,7 +1470,9 @@ app.post('/gestionale/lavori/:id/update', (req, res) => {
   if (customerId && store.customers.some((c) => Number(c.id) === customerId)) {
     job.customerId = customerId;
   }
-  job.serviceId = Number(req.body.serviceId || 0) || null;
+  const serviceIds = parseServiceIdsFromBody(req.body);
+  job.serviceIds = serviceIds;
+  job.serviceId = Number(serviceIds[0] || 0) || null;
   job.title = (req.body.title || '').trim() || job.title;
   job.status = normalizeJobStatus(req.body.status);
   job.startDate = (req.body.startDate || '').trim();
@@ -1427,6 +1485,14 @@ app.post('/gestionale/lavori/:id/update', (req, res) => {
   }
   if (typeof req.body.notes === 'string') {
     job.notes = req.body.notes.trim() || job.description;
+    if (!Array.isArray(job.notesList)) job.notesList = [];
+    if (job.notes.trim()) {
+      job.notesList.unshift({
+        id: Date.now(),
+        text: job.notes.trim(),
+        createdAt: new Date().toISOString()
+      });
+    }
   }
   if (typeof req.body.documentsText === 'string') {
     job.documentsText = req.body.documentsText.trim();
@@ -1434,6 +1500,45 @@ app.post('/gestionale/lavori/:id/update', (req, res) => {
   job.updatedAt = new Date().toISOString();
   upsertDebtItemFromJob(store, job);
 
+  writeStore(store);
+  return res.redirect(`/gestionale/lavori/${id}`);
+});
+
+app.post('/gestionale/lavori/:id/notes/new', (req, res) => {
+  const store = readStore();
+  const id = Number(req.params.id || 0);
+  const job = store.jobs.find((j) => Number(j.id) === id);
+  if (!job) return res.redirect('/gestionale/lavori');
+  const text = (req.body.text || '').trim();
+  if (!text) return res.redirect(`/gestionale/lavori/${id}`);
+  if (!Array.isArray(job.notesList)) job.notesList = [];
+  const now = new Date().toISOString();
+  job.notesList.unshift({
+    id: Date.now(),
+    text,
+    createdAt: now
+  });
+  job.notes = text;
+  job.updatedAt = now;
+  writeStore(store);
+  return res.redirect(`/gestionale/lavori/${id}`);
+});
+
+app.post('/gestionale/lavori/:id/notes/:noteId/update', (req, res) => {
+  const store = readStore();
+  const id = Number(req.params.id || 0);
+  const noteId = Number(req.params.noteId || 0);
+  const job = store.jobs.find((j) => Number(j.id) === id);
+  if (!job || !noteId) return res.redirect('/gestionale/lavori');
+  if (!Array.isArray(job.notesList)) job.notesList = [];
+  const note = job.notesList.find((n) => Number(n.id || 0) === noteId);
+  if (!note) return res.redirect(`/gestionale/lavori/${id}`);
+  const text = (req.body.text || '').trim();
+  if (!text) return res.redirect(`/gestionale/lavori/${id}`);
+  note.text = text;
+  note.updatedAt = new Date().toISOString();
+  job.notes = text;
+  job.updatedAt = new Date().toISOString();
   writeStore(store);
   return res.redirect(`/gestionale/lavori/${id}`);
 });
@@ -1755,6 +1860,13 @@ function normalizeStore(store) {
     if (!job.paymentStatus) job.paymentStatus = 'pending';
     if (!job.startDate) job.startDate = String(job.createdAt || '').slice(0, 10);
     if (!job.documentsText) job.documentsText = '';
+    if (!Array.isArray(job.serviceIds)) {
+      const legacyServiceId = Number(job.serviceId || 0) || null;
+      job.serviceIds = legacyServiceId ? [legacyServiceId] : [];
+    }
+    job.serviceIds = sanitizeServiceIds(job.serviceIds);
+    job.serviceId = Number(job.serviceIds[0] || 0) || null;
+    if (!Array.isArray(job.notesList)) job.notesList = [];
   }
 
   for (const customer of s.customers) {
@@ -1968,7 +2080,10 @@ function buildCustomerWorkItems(jobs, subs, services, store = null) {
     debtId: store ? (getDebtItemBySource(store, 'job', j.id)?.id || null) : null,
     kind: 'job',
     id: Number(j.id),
-    label: j.title || 'Lavoro',
+    label: (() => {
+      const serviceNames = getJobServiceNames(j, services);
+      return serviceNames.length ? `${j.title || 'Lavoro'} (${serviceNames.join(', ')})` : (j.title || 'Lavoro');
+    })(),
     typeLabel: 'Una tantum',
     statusKey: j.status || '',
     statusLabel: labelJobStatus(j.status),
@@ -2108,8 +2223,8 @@ function filterJobs(jobs, customers, services, q, status) {
     if (status && j.status !== status) return false;
     if (!query) return true;
     const customer = customers.find((c) => Number(c.id) === Number(j.customerId || 0));
-    const service = services.find((s) => Number(s.id) === Number(j.serviceId || 0));
-    const blob = `${j.title || ''} ${j.notes || ''} ${customer?.company || ''} ${customer?.email || ''} ${service?.name || ''}`.toLowerCase();
+    const linkedServiceNames = getJobServiceNames(j, services).join(' ');
+    const blob = `${j.title || ''} ${j.notes || ''} ${customer?.company || ''} ${customer?.email || ''} ${linkedServiceNames}`.toLowerCase();
     return blob.includes(query);
   });
 }
@@ -2889,10 +3004,114 @@ function renderJobsTimeline(jobs) {
   return `<ul class="crm-timeline">${rows}</ul>`;
 }
 
+function renderJobTimeline(job, services) {
+  const events = [];
+  const serviceNames = getJobServiceNames(job, services);
+  events.push({
+    date: job.createdAt || '',
+    label: 'Attivita creata',
+    detail: job.title || 'Attivita'
+  });
+  if (job.startDate) {
+    events.push({
+      date: `${job.startDate}T00:00:00`,
+      label: 'Data inizio',
+      detail: formatDateItShort(job.startDate)
+    });
+  }
+  if (job.dueDate) {
+    events.push({
+      date: `${job.dueDate}T00:00:00`,
+      label: 'Data prevista conclusione',
+      detail: formatDateItShort(job.dueDate)
+    });
+  }
+  events.push({
+    date: job.updatedAt || job.createdAt || '',
+    label: 'Ultimo aggiornamento fase',
+    detail: labelJobStatus(job.status)
+  });
+  if (serviceNames.length) {
+    events.push({
+      date: job.updatedAt || job.createdAt || '',
+      label: 'Servizi collegati',
+      detail: serviceNames.join(', ')
+    });
+  }
+  const noteEvents = Array.isArray(job.notesList)
+    ? job.notesList.map((n) => ({
+      date: n.updatedAt || n.createdAt || '',
+      label: n.updatedAt ? 'Nota aggiornata' : 'Nota inserita',
+      detail: n.text || ''
+    }))
+    : [];
+  const rows = events
+    .concat(noteEvents)
+    .filter((e) => e.date)
+    .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')))
+    .map((e) => `<li><strong>${esc(e.label)}</strong> · ${esc(e.detail || '-')} <span class="muted">(${esc(formatDateItShort((e.date || '').slice(0, 10)))})</span></li>`)
+    .join('');
+  if (!rows) return '<p class="muted">Nessun evento disponibile.</p>';
+  return `<ul class="crm-timeline">${rows}</ul>`;
+}
+
+function sanitizeServiceIds(input) {
+  const values = Array.isArray(input) ? input : [input];
+  const ids = values
+    .map((v) => Number(v || 0))
+    .filter((n) => Number.isFinite(n) && n > 0);
+  return Array.from(new Set(ids));
+}
+
+function parseServiceIdsFromBody(body) {
+  const fromMulti = body.serviceIds;
+  if (Array.isArray(fromMulti)) return sanitizeServiceIds(fromMulti);
+  if (typeof fromMulti === 'string' && fromMulti.trim()) return sanitizeServiceIds([fromMulti]);
+  const legacy = Number(body.serviceId || 0);
+  return legacy > 0 ? [legacy] : [];
+}
+
+function getJobServiceIds(job) {
+  if (Array.isArray(job.serviceIds) && job.serviceIds.length) {
+    return sanitizeServiceIds(job.serviceIds);
+  }
+  const legacy = Number(job.serviceId || 0);
+  return legacy > 0 ? [legacy] : [];
+}
+
+function getJobServiceNames(job, services) {
+  const ids = getJobServiceIds(job);
+  return ids
+    .map((id) => services.find((s) => Number(s.id) === id))
+    .filter(Boolean)
+    .map((s) => s.name);
+}
+
 function renderCustomerNotes(notes) {
   if (!notes.length) return '<p class="muted" style="margin-top:12px">Questo record non ha note.</p>';
   const rows = notes
     .map((n) => `<div class="crm-note"><div class="muted">${esc((n.createdAt || '').slice(0, 10))}</div><div>${esc(n.text)}</div></div>`)
+    .join('');
+  return `<div class="crm-notes-list">${rows}</div>`;
+}
+
+function renderJobNotesList(notes, jobId) {
+  if (!Array.isArray(notes) || !notes.length) return '<p class="muted" style="margin-top:12px">Nessuna nota registrata.</p>';
+  const rows = [...notes]
+    .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
+    .map((n) => {
+      const noteDate = formatDateItShort(String(n.createdAt || '').slice(0, 10));
+      return `<div class="crm-note">
+        <div class="row-between">
+          <div class="muted">Data nota: ${esc(noteDate)}</div>
+          <button type="button" class="copy-btn js-note-edit" data-target="note-${Number(n.id)}">Modifica</button>
+        </div>
+        <form method="post" action="/gestionale/lavori/${Number(jobId)}/notes/${Number(n.id)}/update" class="form-grid js-note-editor" id="note-${Number(n.id)}">
+          <textarea name="text" rows="4" readonly>${esc(n.text || '')}</textarea>
+          <button type="submit" class="js-note-save" hidden>Salva modifica</button>
+        </form>
+      </div>`;
+    })
     .join('');
   return `<div class="crm-notes-list">${rows}</div>`;
 }
