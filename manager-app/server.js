@@ -1029,14 +1029,14 @@ app.get('/gestionale/lavori/new', (req, res) => {
     .replace(/>/g, '\\u003e')
     .replace(/&/g, '\\u0026');
   const body = `
-    <h1>Crea Affare</h1>
+    <h1>Crea Attivita</h1>
     ${notice}
     <section class="card">
       <form method="post" action="/gestionale/lavori/new" class="form-grid">
-        <h2>Informazioni Affare</h2>
+        <h2>Informazioni attivita</h2>
         <div class="affare-grid">
-          <label for="title">Nome Affare</label>
-          <input id="title" type="text" name="title" placeholder="Nome affare" required />
+          <label for="title">Nome attivita</label>
+          <input id="title" type="text" name="title" placeholder="Nome attivita" required />
 
           <label for="companySearch">Nome Societa</label>
           <div>
@@ -1071,56 +1071,16 @@ app.get('/gestionale/lavori/new', (req, res) => {
           <label for="secondaryContacts">Contatti secondario</label>
           <input id="secondaryContacts" type="text" name="secondaryContacts" placeholder="Cerca o inserisci contatti secondari" />
 
-          <label for="pipelineName">Pipeline secondaria & Fase</label>
-          <div class="two-col" style="display:grid;gap:10px">
-            <select id="pipelineName" name="pipelineName">
-              <option value="Pipeline di vendita standard">Pipeline di vendita standard</option>
-              <option value="Pipeline annuale">Pipeline annuale</option>
-              <option value="Pipeline tecnico-operativa">Pipeline tecnico-operativa</option>
-            </select>
-            <select name="status">
-              ${JOB_STATUS_OPTIONS.map((s) => `<option value="${s}">${esc(labelJobStatus(s))}</option>`).join('')}
-            </select>
-          </div>
-
-          <label for="amount">Valore</label>
-          <input id="amount" type="number" name="amount" step="0.01" min="0" placeholder="0.00" readonly />
+          <label for="status">Fase attivita</label>
+          <select id="status" name="status">
+            ${JOB_STATUS_OPTIONS.map((s) => `<option value="${s}">${esc(labelJobStatus(s))}</option>`).join('')}
+          </select>
 
           <label for="dueDate">Data di chiusura</label>
           <input id="dueDate" type="date" name="dueDate" />
 
           <label for="description">Descrizione</label>
           <textarea id="description" name="description" rows="3" placeholder="Alcune osservazioni su affare"></textarea>
-        </div>
-
-        <h2>Informazioni addizionali</h2>
-        <div class="affare-grid">
-          <label for="downPayment">Anticipo versato</label>
-          <input id="downPayment" type="number" name="downPayment" step="0.01" min="0" placeholder="0.00" />
-
-          <label for="remainingBalance">Saldo mancante</label>
-          <input id="remainingBalance" type="number" name="remainingBalance" step="0.01" min="0" placeholder="0.00" />
-
-          <label for="annualDueDate">Scadenza gestione annuale</label>
-          <input id="annualDueDate" type="date" name="annualDueDate" />
-        </div>
-
-        <h2>Prodotti associato</h2>
-        <div class="affare-grid">
-          <label for="productName">Prodotto</label>
-          <input id="productName" type="text" name="productName" placeholder="Cerca Prodotto" />
-
-          <label for="productPrice">Prezzo listino (€)</label>
-          <input id="productPrice" type="number" name="productPrice" step="0.01" min="0" placeholder="0.00" />
-
-          <label for="productQty">Quantita</label>
-          <input id="productQty" type="number" name="productQty" step="1" min="1" value="1" />
-
-          <label for="productDiscount">Sconto (%)</label>
-          <input id="productDiscount" type="number" name="productDiscount" step="0.01" min="0" max="100" value="0" />
-
-          <label for="productTotal">Totale (€)</label>
-          <input id="productTotal" type="number" name="productTotal" step="0.01" min="0" placeholder="Calcolato o manuale" />
         </div>
 
         <div class="row-between">
@@ -1135,8 +1095,9 @@ app.get('/gestionale/lavori/new', (req, res) => {
             </div>
             <div id="serviceListNew" class="selected-service-list"></div>
             <div id="serviceHiddenNew"></div>
+            <input type="hidden" id="amount" name="amount" value="0" />
           </div>
-          <button type="submit">Crea Affare</button>
+          <button type="submit">Crea attivita</button>
         </div>
       </form>
     </section>
@@ -1293,7 +1254,7 @@ app.post('/gestionale/lavori/new', (req, res) => {
     contactName: (req.body.contactName || '').trim(),
     contactEmail: (req.body.contactEmail || '').trim(),
     secondaryContacts: (req.body.secondaryContacts || '').trim(),
-    pipelineName: (req.body.pipelineName || '').trim(),
+    pipelineName: '',
     downPayment: Number(req.body.downPayment || 0),
     remainingBalance: Number(req.body.remainingBalance || 0),
     annualDueDate: (req.body.annualDueDate || '').trim(),
@@ -1738,22 +1699,54 @@ app.post('/gestionale/lavori/:id/delete', (req, res) => {
 app.get('/gestionale/rinnovi', (req, res) => {
   const store = readStore();
   const q = (req.query.q || '').toString().trim();
-  const payment = (req.query.payment || '').toString().trim();
-  const debts = filterUnifiedDebts(buildUnifiedDebtRows(store), q, payment);
+  const renewQ = (req.query.renew_q || '').toString().trim();
+  const renewPayment = (req.query.renew_payment || '').toString().trim();
+  const debts = filterUnifiedDebts(buildUnifiedDebtRows(store), q, '');
+  const pendingDebts = debts.filter((d) => d.paymentStatus !== 'paid');
+  const paidDebts = debts.filter((d) => d.paymentStatus === 'paid');
+  const renewals = filterRenewals(
+    chronologicalRenewals(store).filter((s) => s.billingType === 'subscription'),
+    store.services,
+    renewQ,
+    renewPayment
+  );
   const body = `
     <h1>Debiti clienti</h1>
     <section class="card">
-      <h2>Voci economiche e pagamenti</h2>
-      <form method="get" action="/gestionale/rinnovi" class="filter-grid">
-        <input type="text" name="q" value="${esc(q)}" placeholder="Cerca cliente/attivita/servizio" />
-        <select name="payment">
-          <option value="">Stato pagamento: tutti</option>
-          <option value="pending" ${payment === 'pending' ? 'selected' : ''}>In attesa</option>
-          <option value="paid" ${payment === 'paid' ? 'selected' : ''}>Pagato</option>
-        </select>
-        <button type="submit">Filtra</button>
-      </form>
-      ${renderUnifiedDebtsTable(debts, true)}
+      <div class="dash-tabs">
+        <button type="button" class="dash-tab-btn is-active" data-tab="debiti-tab">Debiti aperti</button>
+        <button type="button" class="dash-tab-btn" data-tab="rinnovi-tab">Rinnovi abbonamenti</button>
+      </div>
+
+      <div class="dash-tab-panel is-active" data-panel="debiti-tab">
+        <h2>Voci economiche non pagate / in attesa</h2>
+        <form method="get" action="/gestionale/rinnovi" class="filter-grid">
+          <input type="text" name="q" value="${esc(q)}" placeholder="Cerca cliente/attivita/servizio" />
+          <input type="hidden" name="renew_q" value="${esc(renewQ)}" />
+          <input type="hidden" name="renew_payment" value="${esc(renewPayment)}" />
+          <button type="submit">Filtra</button>
+        </form>
+        ${renderUnifiedDebtsTable(pendingDebts, true)}
+        <details class="card" style="margin-top:12px">
+          <summary><strong>Pagati (${paidDebts.length})</strong></summary>
+          <div style="margin-top:10px">${renderUnifiedDebtsTable(paidDebts, true)}</div>
+        </details>
+      </div>
+
+      <div class="dash-tab-panel" data-panel="rinnovi-tab">
+        <h2>Rinnovi annuali / abbonamenti in ordine scadenza</h2>
+        <form method="get" action="/gestionale/rinnovi" class="filter-grid">
+          <input type="hidden" name="q" value="${esc(q)}" />
+          <input type="text" name="renew_q" value="${esc(renewQ)}" placeholder="Cerca cliente/servizio abbonamento" />
+          <select name="renew_payment">
+            <option value="">Stato pagamento: tutti</option>
+            <option value="pending" ${renewPayment === 'pending' ? 'selected' : ''}>In attesa</option>
+            <option value="paid" ${renewPayment === 'paid' ? 'selected' : ''}>Pagato</option>
+          </select>
+          <button type="submit">Filtra</button>
+        </form>
+        ${renderSubscriptionsTableForAdmin(renewals, store.services, true)}
+      </div>
     </section>
   `;
   res.send(renderAppLayout('Gestionale - Debiti Clienti', body, req.user, true));
