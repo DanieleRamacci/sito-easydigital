@@ -749,6 +749,9 @@ app.get('/gestionale/clienti/:id', (req, res) => {
             <div class="row-between">
               <h2>Storico attivita e servizi cliente</h2>
             </div>
+            <h3>Attivita cliente</h3>
+            ${renderJobsTable(customerJobs, [customer], store.services, false)}
+            <h3 style="margin-top:12px">Servizi cliente</h3>
             ${renderCustomerWorkItemsTable(customerServiceItems, store, { scopeLabel: 'cliente' })}
           </section>
         </div>
@@ -1087,7 +1090,7 @@ app.get('/gestionale/lavori/new', (req, res) => {
           <div class="form-grid" style="width:100%">
             <label for="servicePickerNew">Servizi collegati (aggiungi con +)</label>
             <div class="inline-actions">
-              <select id="servicePickerNew">
+              <select id="servicePickerNew" name="serviceId">
                 <option value="">Seleziona servizio</option>
                 ${serviceOptions}
               </select>
@@ -1352,7 +1355,7 @@ app.get('/gestionale/lavori/:id', (req, res) => {
       <aside class="card crm-left">
         <h2>Cliente associato</h2>
         ${customer ? `
-          <p><strong>${esc(customer.company || `${customer.firstName} ${customer.lastName}`)}</strong></p>
+          <p><strong><a href="/gestionale/clienti/${customer.id}">${esc(customer.company || `${customer.firstName} ${customer.lastName}`)}</a></strong></p>
           <p>${esc(customer.email || '-')}</p>
           <p>${esc(customer.phone || '-')}</p>
           <p>P.IVA: ${esc(customer.vat || '-')}</p>
@@ -1388,7 +1391,7 @@ app.get('/gestionale/lavori/:id', (req, res) => {
             <div class="form-grid">
               <label for="servicePickerEdit">Servizi collegati (aggiungi con +)</label>
               <div class="inline-actions">
-                <select id="servicePickerEdit">
+                <select id="servicePickerEdit" name="serviceId">
                   <option value="">Seleziona servizio</option>
                   ${serviceOptions}
                 </select>
@@ -1808,7 +1811,7 @@ app.post('/gestionale/rinnovi/:id/payment', (req, res) => {
     if (debt) {
       debt.amountPaid = payment === 'paid' ? Number(debt.amountTotal || 0) : 0;
     }
-    if (payment === 'paid' && sub.billingType === 'subscription' && sub.renewalDate) {
+    if (payment === 'paid' && sub.billingType === 'subscription' && sub.renewalDate && !sub.jobId) {
       sub.lastPaidAt = new Date().toISOString().slice(0, 10);
       sub.renewalDate = computeRenewalDate(sub.renewalDate, sub.billingInterval || 'annual');
       sub.paymentStatus = 'pending';
@@ -2078,6 +2081,14 @@ function syncDebtItemsFromLegacyRecords(store) {
 
 function upsertDebtItemFromJob(store, job) {
   if (!job) return null;
+  if (getJobServiceIds(job).length > 0) {
+    const existing = getDebtItemBySource(store, 'job', job.id);
+    if (existing) {
+      store.paymentEntries = store.paymentEntries.filter((p) => Number(p.debtItemId || 0) !== Number(existing.id));
+      store.debtItems = store.debtItems.filter((d) => Number(d.id) !== Number(existing.id));
+    }
+    return null;
+  }
   let debt = getDebtItemBySource(store, 'job', job.id);
   const amountTotal = Number(job.amount || 0);
   const shouldBePaid = job.paymentStatus === 'paid';
