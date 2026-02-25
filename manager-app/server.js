@@ -255,6 +255,7 @@ app.get('/gestionale', (req, res) => {
   const renewQ = (req.query.renew_q || '').toString().trim();
   const renewPayment = (req.query.renew_payment || '').toString().trim();
   const jobs = filterJobs(allJobs, store.customers, store.services, jobQ, jobStatus);
+  const jobsBuckets = bucketJobsForBoard(jobs);
   const debts = filterUnifiedDebts(allDebts, renewQ, renewPayment);
 
   const body = `
@@ -290,7 +291,18 @@ app.get('/gestionale', (req, res) => {
           <input type="hidden" name="renew_payment" value="${esc(renewPayment)}" />
           <button type="submit">Filtra</button>
         </form>
-        <div style="margin-top:12px">${renderJobsTable(jobs, store.customers, store.services, true)}</div>
+        <div style="margin-top:12px">
+          <h3>Attivita operative</h3>
+          ${renderJobsTable(jobsBuckets.active, store.customers, store.services, true)}
+        </div>
+        <details class="card" style="margin-top:12px">
+          <summary><strong>Richieste da smaltire (${jobsBuckets.backlog.length})</strong> · Scrittura preventivo + Qualificazione</summary>
+          <div style="margin-top:10px">${renderJobsTable(jobsBuckets.backlog, store.customers, store.services, true)}</div>
+        </details>
+        <details class="card" style="margin-top:12px">
+          <summary><strong>Attivita chiuse (${jobsBuckets.closed.length})</strong> · Chiuse acquisite e perse</summary>
+          <div style="margin-top:10px">${renderJobsTable(jobsBuckets.closed, store.customers, store.services, true)}</div>
+        </details>
       </div>
 
       <div class="dash-tab-panel" data-panel="dash-renewals">
@@ -938,6 +950,7 @@ app.get('/gestionale/lavori', (req, res) => {
   const q = (req.query.q || '').toString().trim();
   const status = (req.query.status || '').toString().trim();
   const rows = filterJobs(store.jobs, store.customers, store.services, q, status);
+  const jobsBuckets = bucketJobsForBoard(rows);
   const body = `
     <h1>Attivita / Lavori</h1>
     <section class="card row-between">
@@ -954,7 +967,18 @@ app.get('/gestionale/lavori', (req, res) => {
         </select>
         <button type="submit">Filtra</button>
       </form>
-      ${renderJobsTable(rows, store.customers, store.services, true)}
+      <h2>Attivita operative</h2>
+      ${renderJobsTable(jobsBuckets.active, store.customers, store.services, true)}
+
+      <details class="card" style="margin-top:12px">
+        <summary><strong>Richieste da smaltire (${jobsBuckets.backlog.length})</strong> · Scrittura preventivo + Qualificazione</summary>
+        <div style="margin-top:10px">${renderJobsTable(jobsBuckets.backlog, store.customers, store.services, true)}</div>
+      </details>
+
+      <details class="card" style="margin-top:12px">
+        <summary><strong>Attivita chiuse (${jobsBuckets.closed.length})</strong> · Chiuse acquisite e perse</summary>
+        <div style="margin-top:10px">${renderJobsTable(jobsBuckets.closed, store.customers, store.services, true)}</div>
+      </details>
     </section>
   `;
   res.send(renderAppLayout('Gestionale - Attivita', body, req.user, true));
@@ -2329,6 +2353,31 @@ function filterJobs(jobs, customers, services, q, status) {
     const blob = `${j.title || ''} ${j.notes || ''} ${customer?.company || ''} ${customer?.email || ''} ${linkedServiceNames}`.toLowerCase();
     return blob.includes(query);
   });
+}
+
+function bucketJobsForBoard(jobs) {
+  const activeStatuses = new Set(['in_lavorazione', 'in_attesa_pagamento', 'gestione_annuale']);
+  const backlogStatuses = new Set(['scrittura_preventivo', 'qualificazione_preventivo']);
+  const closedStatuses = new Set(['chiusa_acquisita', 'chiusa_persa']);
+  const order = {
+    in_lavorazione: 1,
+    in_attesa_pagamento: 2,
+    gestione_annuale: 3,
+    scrittura_preventivo: 4,
+    qualificazione_preventivo: 5,
+    chiusa_acquisita: 6,
+    chiusa_persa: 7
+  };
+  const byPriority = (a, b) => {
+    const pa = order[a.status] || 99;
+    const pb = order[b.status] || 99;
+    if (pa !== pb) return pa - pb;
+    return String(b.updatedAt || b.createdAt || '').localeCompare(String(a.updatedAt || a.createdAt || ''));
+  };
+  const active = jobs.filter((j) => activeStatuses.has(j.status)).sort(byPriority);
+  const backlog = jobs.filter((j) => backlogStatuses.has(j.status)).sort(byPriority);
+  const closed = jobs.filter((j) => closedStatuses.has(j.status)).sort(byPriority);
+  return { active, backlog, closed };
 }
 
 function filterRenewals(rows, services, q, payment) {
