@@ -8,7 +8,7 @@ COPY packages ./packages
 COPY apps/frontend ./apps/frontend
 
 RUN npm install
-RUN npm --workspace @eda/frontend run build -- --base-href "/${APP_SUBPATH}/" --deploy-url "/${APP_SUBPATH}/"
+RUN npm --workspace @eda/frontend run build -- --configuration production --base-href "/${APP_SUBPATH}/" --deploy-url "/${APP_SUBPATH}/"
 
 FROM nginx:1.27-alpine AS prod
 ARG APP_SUBPATH=gestionale-2
