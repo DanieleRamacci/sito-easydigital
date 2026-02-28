@@ -1,0 +1,168 @@
+services:
+  db:
+    image: mariadb:11
+    container_name: easydigital-db
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+    volumes:
+      - wp_db_data:/var/lib/mysql
+    networks:
+      - wp_internal
+
+  redis:
+    image: redis:7-alpine
+    container_name: easydigital-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    networks:
+      - wp_internal
+
+  wordpress:
+    image: ghcr.io/danieleramacci/sito-easydigital:latest
+    container_name: easydigital-wordpress
+    depends_on:
+      - db
+      - redis
+    restart: unless-stopped
+    pull_policy: always
+    environment:
+      WORDPRESS_DB_HOST: db:3306
+      WORDPRESS_DB_NAME: ${MYSQL_DATABASE}
+      WORDPRESS_DB_USER: ${MYSQL_USER}
+      WORDPRESS_DB_PASSWORD: ${MYSQL_PASSWORD}
+      WORDPRESS_TABLE_PREFIX: ${WORDPRESS_TABLE_PREFIX}
+      WORDPRESS_CONFIG_EXTRA: |
+        define('WP_CACHE', true);
+        define('WP_REDIS_HOST', '${REDIS_HOST}');
+        define('WP_REDIS_PORT', (int) '${REDIS_PORT}');
+        define('EDA_SSO_SECRET', '${EDA_SSO_SECRET}');
+        define('EDA_AUTH_CALLBACK_URL', 'https://${WP_DOMAIN}/api/auth/callback');
+    volumes:
+      - wp_data:/var/www/html
+    labels:
+      - traefik.enable=true
+
+      - traefik.http.routers.easydigital.rule=Host(`${WP_DOMAIN}`)
+      - traefik.http.routers.easydigital.entrypoints=web
+      - traefik.http.middlewares.easydigital-https-redirect.redirectscheme.scheme=https
+      - traefik.http.routers.easydigital.middlewares=easydigital-https-redirect
+
+      - traefik.http.routers.easydigital-secure.rule=Host(`${WP_DOMAIN}`)
+      - traefik.http.routers.easydigital-secure.entrypoints=websecure
+      - traefik.http.routers.easydigital-secure.tls.certresolver=myresolver
+      - traefik.http.services.easydigital.loadbalancer.server.port=80
+
+      - traefik.http.middlewares.easydigital-sec-headers.headers.stsSeconds=31536000
+      - traefik.http.middlewares.easydigital-sec-headers.headers.stsIncludeSubdomains=true
+      - traefik.http.middlewares.easydigital-sec-headers.headers.stsPreload=true
+      - traefik.http.middlewares.easydigital-sec-headers.headers.browserXssFilter=true
+      - traefik.http.middlewares.easydigital-sec-headers.headers.contentTypeNosniff=true
+      - traefik.http.routers.easydigital-secure.middlewares=easydigital-sec-headers
+    networks:
+      - wp_internal
+      - gruppo_proxy
+
+  manager-app:
+    image: ghcr.io/danieleramacci/sito-easydigital-manager:latest
+    container_name: easydigital-manager
+    restart: unless-stopped
+    pull_policy: always
+    environment:
+      PORT: 3000
+      WP_BASE_URL: https://${WP_DOMAIN}
+      EDA_SSO_SECRET: ${EDA_SSO_SECRET}
+      DATA_DIR: /data
+      SMTP_HOST: ${SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT}
+      SMTP_USER: ${SMTP_USER}
+      SMTP_PASS: ${SMTP_PASS}
+      SMTP_FROM: ${SMTP_FROM}
+    volumes:
+      - manager_data:/data
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.easydigital-manager.rule=Host(`${WP_DOMAIN}`) && ((PathPrefix(`/gestionale`) && !PathPrefix(`/gestionale-2`)) || PathPrefix(`/areapersonale`) || Path(`/logout`))
+      - traefik.http.routers.easydigital-manager.entrypoints=websecure
+      - traefik.http.routers.easydigital-manager.tls.certresolver=myresolver
+      - traefik.http.routers.easydigital-manager.priority=200
+      - traefik.http.services.easydigital-manager.loadbalancer.server.port=3000
+    networks:
+      - wp_internal
+      - gruppo_proxy
+
+  postgres-v2:
+    image: postgres:16
+    container_name: easydigital-postgres-v2
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${MGR_PG_DB}
+      POSTGRES_USER: ${MGR_PG_USER}
+      POSTGRES_PASSWORD: ${MGR_PG_PASSWORD}
+    volumes:
+      - manager_pg_data:/var/lib/postgresql/data
+    networks:
+      - wp_internal
+
+  manager-api-v2:
+    image: ghcr.io/danieleramacci/sito-easydigital-backend:latest
+    container_name: easydigital-manager-api-v2
+    restart: unless-stopped
+    pull_policy: always
+    depends_on:
+      - postgres-v2
+    environment:
+      DATABASE_URL: postgresql://${MGR_PG_USER}:${MGR_PG_PASSWORD}@postgres-v2:5432/${MGR_PG_DB}?schema=public
+      JWT_SECRET: ${EDA_SSO_SECRET}
+      JWT_PUBLIC_KEY: ""
+      COOKIE_DOMAIN: ${COOKIE_DOMAIN}
+      NODE_ENV: production
+      WP_LOGIN_URL: https://${WP_DOMAIN}/wp-json/eda-auth/v1/sso-start?next=/gestionale&target=v2
+      APP_BASE_URL: https://${WP_DOMAIN}/gestionale-2
+      APP_ORIGIN: https://${WP_DOMAIN}
+      BACKEND_PORT: 5050
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.easydigital-manager-api-v2.rule=Host(`${WP_DOMAIN}`) && PathPrefix(`/api`)
+      - traefik.http.routers.easydigital-manager-api-v2.entrypoints=websecure
+      - traefik.http.routers.easydigital-manager-api-v2.tls.certresolver=myresolver
+      - traefik.http.routers.easydigital-manager-api-v2.priority=220
+      - traefik.http.services.easydigital-manager-api-v2.loadbalancer.server.port=5050
+    networks:
+      - wp_internal
+      - gruppo_proxy
+
+  manager-frontend-v2:
+    image: ghcr.io/danieleramacci/sito-easydigital-frontend:latest
+    container_name: easydigital-manager-frontend-v2
+    restart: unless-stopped
+    pull_policy: always
+    depends_on:
+      - manager-api-v2
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.easydigital-manager-v2.rule=Host(`${WP_DOMAIN}`) && PathPrefix(`/gestionale-2`)
+      - traefik.http.routers.easydigital-manager-v2.entrypoints=websecure
+      - traefik.http.routers.easydigital-manager-v2.tls.certresolver=myresolver
+      - traefik.http.routers.easydigital-manager-v2.priority=210
+      - traefik.http.services.easydigital-manager-v2.loadbalancer.server.port=80
+    networks:
+      - gruppo_proxy
+
+networks:
+  wp_internal:
+  gruppo_proxy:
+    external: true
+    name: gruppo_proxy
+
+volumes:
+  wp_data:
+  wp_db_data:
+  redis_data:
+  manager_data:
+  manager_pg_data:

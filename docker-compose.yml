@@ -1,108 +1,68 @@
 services:
-  db:
-    image: mariadb:11
-    container_name: easydigital-db
+  postgres:
+    image: postgres:16
+    container_name: eda_postgres
     restart: unless-stopped
     environment:
-      MYSQL_DATABASE: ${MYSQL_DATABASE}
-      MYSQL_USER: ${MYSQL_USER}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      POSTGRES_USER: eda
+      POSTGRES_PASSWORD: eda
+      POSTGRES_DB: eda_manager
+    ports:
+      - "5432:5432"
     volumes:
-      - wp_db_data:/var/lib/mysql
-    networks:
-      - wp_internal
+      - postgres_data:/var/lib/postgresql/data
 
-  redis:
-    image: redis:7-alpine
-    container_name: easydigital-redis
+  backend:
+    build:
+      context: .
+      dockerfile: apps/backend/Dockerfile
+    container_name: eda_backend
     restart: unless-stopped
-    command: redis-server --appendonly yes
-    volumes:
-      - redis_data:/data
-    networks:
-      - wp_internal
-
-  wordpress:
-    image: ghcr.io/${GHCR_OWNER}/${GHCR_IMAGE}:latest
-    container_name: easydigital-wordpress
     depends_on:
-      - db
-      - redis
-    restart: unless-stopped
-    pull_policy: always
+      - postgres
+    env_file:
+      - .env
     environment:
-      WORDPRESS_DB_HOST: db:3306
-      WORDPRESS_DB_NAME: ${MYSQL_DATABASE}
-      WORDPRESS_DB_USER: ${MYSQL_USER}
-      WORDPRESS_DB_PASSWORD: ${MYSQL_PASSWORD}
-      WORDPRESS_TABLE_PREFIX: ${WORDPRESS_TABLE_PREFIX}
-      WORDPRESS_CONFIG_EXTRA: |
-        define('WP_CACHE', true);
-        define('WP_REDIS_HOST', '${REDIS_HOST}');
-        define('WP_REDIS_PORT', (int) '${REDIS_PORT}');
-        define('EDA_SSO_SECRET', '${EDA_SSO_SECRET}');
-    volumes:
-      - wp_data:/var/www/html
-    labels:
-      - traefik.enable=true
+      DATABASE_URL: ${DATABASE_URL:-postgresql://eda:eda@postgres:5432/eda_manager?schema=public}
+      JWT_SECRET: ${JWT_SECRET:-change-me}
+      JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY:-}
+      COOKIE_DOMAIN: ${COOKIE_DOMAIN:-localhost}
+      NODE_ENV: ${NODE_ENV:-development}
+      WP_LOGIN_URL: ${WP_LOGIN_URL:-}
+      APP_BASE_URL: ${APP_BASE_URL:-http://localhost:4200}
+      BACKEND_PORT: 5050
+    ports:
+      - "5050:5050"
+    command: >
+      sh -c "npm --workspace @eda/backend run prisma:deploy &&
+             npm --workspace @eda/backend run prisma:generate &&
+             npm --workspace @eda/backend run start:dev"
 
-      - traefik.http.routers.easydigital.rule=Host(`${WP_DOMAIN}`)
-      - traefik.http.routers.easydigital.entrypoints=web
-      - traefik.http.middlewares.easydigital-https-redirect.redirectscheme.scheme=https
-      - traefik.http.routers.easydigital.middlewares=easydigital-https-redirect
-
-      - traefik.http.routers.easydigital-secure.rule=Host(`${WP_DOMAIN}`)
-      - traefik.http.routers.easydigital-secure.entrypoints=websecure
-      - traefik.http.routers.easydigital-secure.tls.certresolver=myresolver
-      - traefik.http.services.easydigital.loadbalancer.server.port=80
-
-      - traefik.http.middlewares.easydigital-sec-headers.headers.stsSeconds=31536000
-      - traefik.http.middlewares.easydigital-sec-headers.headers.stsIncludeSubdomains=true
-      - traefik.http.middlewares.easydigital-sec-headers.headers.stsPreload=true
-      - traefik.http.middlewares.easydigital-sec-headers.headers.browserXssFilter=true
-      - traefik.http.middlewares.easydigital-sec-headers.headers.contentTypeNosniff=true
-      - traefik.http.routers.easydigital-secure.middlewares=easydigital-sec-headers
-    networks:
-      - wp_internal
-      - gruppo_proxy
-
-  manager-app:
-    image: ghcr.io/${GHCR_OWNER}/${GHCR_IMAGE}-manager:latest
-    container_name: easydigital-manager
+  frontend:
+    image: node:20-alpine
+    container_name: eda_frontend
+    working_dir: /workspace
     restart: unless-stopped
-    pull_policy: always
-    environment:
-      PORT: 3000
-      WP_BASE_URL: https://${WP_DOMAIN}
-      EDA_SSO_SECRET: ${EDA_SSO_SECRET}
-      DATA_DIR: /data
-      SMTP_HOST: ${SMTP_HOST}
-      SMTP_PORT: ${SMTP_PORT}
-      SMTP_USER: ${SMTP_USER}
-      SMTP_PASS: ${SMTP_PASS}
-      SMTP_FROM: ${SMTP_FROM}
+    depends_on:
+      - backend
     volumes:
-      - manager_data:/data
-    labels:
-      - traefik.enable=true
-      - traefik.http.routers.easydigital-manager.rule=Host(`${WP_DOMAIN}`) && (PathPrefix(`/gestionale`) || PathPrefix(`/areapersonale`) || Path(`/logout`))
-      - traefik.http.routers.easydigital-manager.entrypoints=websecure
-      - traefik.http.routers.easydigital-manager.tls.certresolver=myresolver
-      - traefik.http.routers.easydigital-manager.priority=200
-      - traefik.http.services.easydigital-manager.loadbalancer.server.port=3000
-    networks:
-      - wp_internal
-      - gruppo_proxy
+      - ./:/workspace
+    environment:
+      NODE_ENV: development
+    ports:
+      - "4200:4200"
+    command: sh -c "npm install && npm --workspace @eda/frontend run start"
 
-networks:
-  wp_internal:
-  gruppo_proxy:
-    external: true
-    name: gruppo_proxy
+  frontend-prod:
+    build:
+      context: .
+      dockerfile: apps/frontend/Dockerfile
+    container_name: eda_frontend_prod
+    profiles: ["prod"]
+    depends_on:
+      - backend
+    ports:
+      - "8088:80"
 
 volumes:
-  wp_data:
-  wp_db_data:
-  redis_data:
-  manager_data:
+  postgres_data:

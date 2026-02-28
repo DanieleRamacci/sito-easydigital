@@ -1,0 +1,19 @@
+export const customerStatuses = ['lead', 'invited', 'active'] as const;
+export const serviceBillingTypes = ['one_time', 'subscription'] as const;
+export const billingIntervals = ['monthly', 'semiannual', 'annual'] as const;
+export const subscriptionStatuses = ['active', 'expired', 'cancelled'] as const;
+export const inviteStatuses = ['pending', 'completed', 'expired'] as const;
+export const ticketStatuses = ['open', 'in_progress', 'closed'] as const;
+export const debtSourceTypes = ['job', 'subscription'] as const;
+export const debtItemTypes = ['one_time', 'subscription'] as const;
+export const debtStatuses = ['open', 'cancelled'] as const;
+
+export type CustomerStatus = (typeof customerStatuses)[number];
+export type ServiceBillingType = (typeof serviceBillingTypes)[number];
+export type BillingInterval = (typeof billingIntervals)[number];
+export type SubscriptionStatus = (typeof subscriptionStatuses)[number];
+export type InviteStatus = (typeof inviteStatuses)[number];
+export type TicketStatus = (typeof ticketStatuses)[number];
+export type DebtSourceType = (typeof debtSourceTypes)[number];
+export type DebtItemType = (typeof debtItemTypes)[number];
+export type DebtStatus = (typeof debtStatuses)[number];

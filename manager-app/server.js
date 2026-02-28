@@ -1811,14 +1811,6 @@ app.post('/gestionale/rinnovi/:id/payment', (req, res) => {
     if (debt) {
       debt.amountPaid = payment === 'paid' ? Number(debt.amountTotal || 0) : 0;
     }
-    if (payment === 'paid' && sub.billingType === 'subscription' && sub.renewalDate && !sub.jobId) {
-      sub.lastPaidAt = new Date().toISOString().slice(0, 10);
-      sub.renewalDate = computeRenewalDate(sub.renewalDate, sub.billingInterval || 'annual');
-      sub.paymentStatus = 'pending';
-      upsertDebtItemFromSubscription(store, sub);
-      const renewedDebt = getDebtItemBySource(store, 'subscription', sub.id);
-      if (renewedDebt) renewedDebt.amountPaid = 0;
-    }
     sub.updatedAt = new Date().toISOString();
     writeStore(store);
   }

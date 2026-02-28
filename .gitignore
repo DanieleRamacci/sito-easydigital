@@ -4,3 +4,9 @@ content/services/_generated-*.html
 *.sql
 *.tar
 .DS_Store
+node_modules
+dist
+coverage
+apps/frontend/.angular
+apps/backend/.nestjs
+apps/backend/.prisma-cache

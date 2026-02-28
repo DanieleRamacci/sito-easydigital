@@ -1,364 +1,200 @@
-# sito-easydigital
+# Easy Digital - Gestionale (Monorepo)
 
-Scaffold Docker per pubblicare WordPress su Hetzner con Traefik e deploy via GHCR.
+Riscrittura completa del gestionale MVP (`manager-app/server.js`) in architettura modulare:
+- Frontend: Angular standalone
+- Backend: NestJS + Prisma
+- DB: PostgreSQL
+- Shared package: DTO/validator comuni (`@eda/shared`)
 
-## 1) Crea la nuova repository
+## Struttura
 
-Opzione consigliata: copia il contenuto di questa cartella in una nuova repo dedicata.
+```text
+.
+├── apps
+│   ├── backend
+│   │   ├── prisma
+│   │   │   ├── migrations
+│   │   │   ├── schema.prisma
+│   │   │   └── seed.ts
+│   │   ├── scripts
+│   │   │   └── migrate-json-to-db.ts
+│   │   └── src
+│   │       ├── common
+│   │       ├── modules
+│   │       │   ├── auth
+│   │       │   ├── area
+│   │       │   ├── billing
+│   │       │   ├── customers
+│   │       │   ├── debt
+│   │       │   ├── imports
+│   │       │   ├── invites
+│   │       │   ├── jobs
+│   │       │   ├── services
+│   │       │   ├── subscriptions
+│   │       │   └── tickets
+│   │       ├── app.module.ts
+│   │       └── main.ts
+│   └── frontend
+│       └── src
+│           ├── app
+│           │   ├── core
+│           │   ├── features
+│           │   │   ├── root
+│           │   │   ├── auth
+│           │   │   ├── area
+│           │   │   └── admin
+│           │   ├── layouts
+│           │   ├── shared
+│           │   ├── app.config.ts
+│           │   └── app.routes.ts
+│           └── styles.css
+├── packages
+│   └── shared
+│       └── src
+│           ├── enums.ts
+│           ├── schemas.ts
+│           └── index.ts
+├── docker-compose.yml
+├── package.json
+└── tsconfig.base.json
+```
 
-Struttura attesa nella nuova repo:
+## Requisiti
 
-- `Dockerfile`
-- `docker-compose.yml`
-- `.env.example`
-- `.github/workflows/ghcr.yml`
+- Node 20+
+- Docker + Docker Compose
 
-## 2) GitHub Actions -> GHCR
+## Environment
 
-Il workflow `ghcr.yml` fa build e push automatico su `ghcr.io/<owner>/<repo>:latest` ad ogni push su `main`.
+Copia `.env.example` in `.env` e configura:
 
-Requisiti:
+- `DATABASE_URL`
+- `JWT_SECRET` oppure `JWT_PUBLIC_KEY`
+- `COOKIE_DOMAIN`
+- `NODE_ENV`
+- `WP_LOGIN_URL`
+- `APP_BASE_URL`
+- `APP_ORIGIN` (opzionale, default derivato da `APP_BASE_URL`)
 
-- Repo su GitHub.
-- GitHub Packages abilitato.
-- Workflow permissions: `Read and write permissions` (Settings -> Actions -> General).
+Per flusso SSO WordPress -> nuovo backend/frontend:
+- `WP_LOGIN_URL` deve puntare all'endpoint WordPress SSO in modalita v2, ad esempio: `https://wp.tuodominio.it/wp-json/eda-auth/v1/sso-start?next=/gestionale&target=v2`
+- `APP_BASE_URL` deve essere l'URL pubblico del frontend, ad esempio: `https://manager.tuodominio.it`
 
-## 3) Configurazione sul server Hetzner
-
-Sul server:
+## Avvio rapido (Docker)
 
 ```bash
-mkdir -p /opt/sito-easydigital
-cd /opt/sito-easydigital
-# clona qui la repo nuova
+docker compose up --build
+```
+
+Servizi:
+- Backend: `http://localhost:5050`
+- Frontend dev: `http://localhost:4200`
+- Postgres: `localhost:5432`
+
+Frontend produzione (nginx):
+
+```bash
+docker compose --profile prod up --build frontend-prod
+```
+
+## Avvio locale
+
+```bash
+npm install
 cp .env.example .env
+npm --workspace @eda/backend run prisma:generate
+npm --workspace @eda/backend run prisma:deploy
+npm --workspace @eda/backend run prisma:seed
+npm --workspace @eda/backend run start:dev
+npm --workspace @eda/frontend run start
 ```
 
-Aggiorna `.env` con valori reali:
+## Migrazioni Prisma
 
-- `WP_DOMAIN`
-- credenziali DB
-- `GHCR_OWNER`
-- `GHCR_IMAGE`
+Schema source of truth: `apps/backend/prisma/schema.prisma` (allineato alla specifica con le note compatibilità sotto).
 
-Login a GHCR dal server:
+Nota compatibilità Prisma:
+- `@db.Numeric` è stato convertito in `@db.Decimal` (equivalente su PostgreSQL).
+- Le relazioni polimorfiche di comodità su `DebtItem.sourceId` non sono materializzate come FK Prisma (integrità gestita via codice e `@@unique([sourceType, sourceId])`).
+
+Comandi:
 
 ```bash
-docker login ghcr.io -u <github-username>
+npm --workspace @eda/backend run prisma:migrate
+npm --workspace @eda/backend run prisma:deploy
 ```
 
-Deploy:
+## Seed
+
+Seed minimo richiesto (2 services, 1 customer, 1 job, 1 subscription, 1 debt item):
 
 ```bash
-docker compose pull
-docker compose up -d
+npm --workspace @eda/backend run prisma:seed
 ```
 
-## 4) Dominio e HTTPS
+## Migrazione JSON MVP
 
-- DNS: record `A` del dominio verso IP Hetzner.
-- Traefik deve gia avere entrypoints `web`/`websecure` e certresolver `myresolver`.
-- La rete Docker `gruppo_proxy` deve esistere sul server.
-
-## 5) Migrazione da cPanel
-
-- Esporta DB WordPress da phpMyAdmin in `.sql`.
-- Copia `wp-content`.
-- Import DB nel container MariaDB:
+Importa lo store JSON legacy nel DB PostgreSQL:
 
 ```bash
-docker exec -i easydigital-db mysql -u wp_user -p'PASSWORD' wordpress < backup.sql
+npm --workspace @eda/backend run migrate:json -- /path/to/store.json
 ```
 
-- Ripristina `wp-content` dentro il volume `wp_data`.
+Default path fallback:
+- `manager-app/data/store.json`
 
-## 6) Prefisso Tabelle (obbligatorio)
+## Test
 
-Questo progetto usa un dump con prefisso tabelle custom (`fmf5SsoeG_`).
+Unit test business rules:
+- `syncJobServiceSubscriptions`
+- `upsertDebtItemFromJob`
+- `applyPayment`
 
-Nel file `.env` deve essere presente:
+Esegui:
 
 ```bash
-WORDPRESS_TABLE_PREFIX=fmf5SsoeG_
+npm --workspace @eda/backend run test
 ```
 
-Se il prefisso e errato, WordPress mostra la procedura di installazione guidata.
+## Route principali frontend
 
-## 7) Content-As-Code per pagine servizi
+- `/`
+- `/logout`
+- `/areapersonale`
+- `/areapersonale/invito`
+- `/gestionale`
+- `/gestionale/servizi`
+- `/gestionale/importazioni`
+- `/gestionale/clienti`
+- `/gestionale/clienti/new`
+- `/gestionale/clienti/:id`
+- `/gestionale/lavori`
+- `/gestionale/lavori/new`
+- `/gestionale/lavori/:id`
+- `/gestionale/rinnovi`
+- `/gestionale/abbonamenti/:id`
+- `/gestionale/debiti`
+- `/gestionale/ticket`
 
-Questa repo include uno scaffold per creare e aggiornare pagine servizio via API WordPress:
+## Auth
 
-- `content/services/*.md`: un file per servizio.
-- `content/articles/*.md`: un file per articolo.
-- `content/seo/topical-map.csv`: mappa pillar/cluster.
-- `content/seo/internal-links.csv`: piano link interni.
-- `content/seo/board.csv`: stato editoriale.
-- `content/seo/editorial-rules.md`: regole standard per scrittura articoli.
-- `content/seo/content-graph.json`: fotografia nodi/collegamenti (generata).
-- `content/templates/service-page.html`: template HTML comune per ogni pagina servizio.
-- `content/templates/article-page.html`: template HTML comune per ogni articolo.
-- `content/templates/services-index.html`: template HTML della pagina madre servizi (non Elementor).
-- `scripts/publish-services.sh`: crea/aggiorna pagina madre + pagine figlie.
-- `scripts/publish-articles.sh`: crea/aggiorna articoli.
-- `scripts/publish-blog-index.sh`: crea/aggiorna pagina hub articoli (la pagina legge i post direttamente da WordPress REST API).
-- `scripts/build-content-graph.sh`: genera JSON con relazioni servizi/articoli.
-- `scripts/publish-content.sh`: pipeline completa.
-- `content/.publish.env.example`: configurazione API.
+- Cookie sessione: `eda_mgr_session` (`httpOnly`)
+- `GET /api/me` legge il JWT validato lato backend
+- Guard admin su route gestionali (`roles` include `administrator`)
+- `POST /api/logout` cancella cookie
 
-### Formato file servizio
+### Bridge WordPress (plugin `eda-auth-bridge`)
 
-Esempio (`content/services/seo-locale.md`):
+Per usare il nuovo stack, in `wp-config.php` del sito WordPress imposta:
 
-```md
-slug: seo-locale-roma
-title: SEO Locale Roma
-card_title: SEO Locale
-excerpt: Descrizione breve card e introduzione pagina.
-service_class: eda-gestione-annuale
-badge_label: Servizio continuativo
-cta_primary_text: Richiedi un preventivo
-cta_primary_url: /contatti
-hero_services_title: Servizi inclusi
-service_included_list: <div class="eda-service-item"><div class="eda-service-item-left"><span class="eda-service-bullet"></span><span class="eda-service-label">Gestione WordPress</span></div><span class="eda-service-tag">Core</span></div>
-context_title: Perche investire in questo servizio
-context_intro: Intro problema/contesto.
-seo_title: SEO Locale Roma per PMI
-seo_description: Descrizione SEO sintetica.
-focus_keyword: seo locale roma
-canonical_url: https://staging.easydigitalagency.it/servizi-digital-agency/seo-locale-roma/
-ai_entities: SEO locale, Google Business Profile, web agency roma
-ai_prompt: Spiegami questo servizio in italiano.
-related_service_slugs: altro-servizio-slug
-related_article_slugs: articolo-collegato-slug
-inline_links_html: <p><a href="/slug-articolo/">Anchor interna</a></p>
-status: draft
-
-<section>
-  <h2>Titolo sezione</h2>
-  <p>Contenuto HTML della pagina servizio.</p>
-</section>
+```php
+define('EDA_SSO_SECRET', 'stesso-valore-di-JWT_SECRET-backend');
+define('EDA_AUTH_CALLBACK_URL', 'https://api.tuodominio.it/api/auth/callback');
 ```
-
-### Setup API key (Application Password)
-
-Sul sito WordPress (utente admin):
-
-1. Vai su `Utenti` -> `Profilo`.
-2. Sezione `Application Passwords`.
-3. Crea una nuova password applicazione (es: `codex-publisher`).
-4. Copia la password generata.
-
-Poi crea il file locale:
-
-```bash
-cp content/.publish.env.example content/.publish.env
-```
-
-Compila:
-
-```bash
-WP_BASE_URL=https://staging.easydigitalagency.it
-WP_USERNAME=<utente-admin-wordpress>
-WP_APP_PASSWORD=<application-password>
-SERVICES_PARENT_SLUG=servizi-digital-agency
-SERVICES_PARENT_TITLE=I Servizi Web Agency Digital a Roma
-SERVICES_PARENT_INTRO=Scopri i servizi digitali pensati per far crescere il tuo business online.
-DEFAULT_PAGE_STATUS=draft
-PARENT_PAGE_STATUS=publish
-DEFAULT_ARTICLE_STATUS=draft
-ARTICLE_BASE_PATH=
-BLOG_INDEX_SLUG=articoli-e-guide-digitali
-BLOG_INDEX_TITLE=Articoli e Guide Digitali
-BLOG_INDEX_INTRO=Approfondimenti pratici su SEO, WordPress, performance e crescita online.
-BLOG_INDEX_STATUS=publish
-BLOG_INDEX_TEMPLATE=elementor_header_footer
-SERVICE_PAGE_TEMPLATE=elementor_header_footer
-PARENT_PAGE_TEMPLATE=elementor_header_footer
-```
-
-### Publish completo (servizi + articoli + graph)
-
-```bash
-chmod +x scripts/publish-content.sh
-./scripts/publish-content.sh
-```
-
-Risultato:
-
-- crea/aggiorna la pagina madre `/servizi-digital-agency/` con layout card snello
-- crea/aggiorna pagine figlie sotto `/servizi-digital-agency/<slug>/`
-- crea/aggiorna articoli da `content/articles/*.md`
-- crea/aggiorna la pagina hub articoli in `/${BLOG_INDEX_SLUG}/` (inclusi anche articoli creati manualmente in WordPress)
-- usa un template HTML unico SEO-friendly per ogni servizio
-- aggiorna meta SEO Rank Math (title, description, focus keyword, canonical opzionale)
-- include JSON-LD strutturato (Organization + WebPage + Service + entita "about")
-- genera file utili:
-  - `content/services/_generated-cards.html`
-  - `content/services/_generated-services-index.html`
-  - `content/articles/_generated-blog-index.html`
-  - `content/seo/content-graph.json`
-
-Nota: la pagina madre viene gestita dal contenuto WordPress standard (non Elementor). Dopo la prima pubblicazione aggiorna il menu del sito verso `/servizi-digital-agency/`.
-
-## 8) Stato publish da GitHub Actions (attuale)
-
-La pubblicazione automatica via GitHub Actions e disabilitata: il workflow
-`.github/workflows/publish-services.yml` non parte piu al `push` su `main`.
-
-Per ora la procedura consigliata e solo manuale da locale:
-
-```bash
-cp content/.publish.env.example content/.publish.env
-# compila il file con le credenziali WordPress corrette
-bash scripts/publish-content.sh
-```
-
-In questo modo eviti conflitti tra variabili GitHub e variabili locali (es. slug pagina madre diversi).
-
-### Se vuoi riattivare in futuro il publish automatico
-
-1. Ripristina il trigger `push` nel file `.github/workflows/publish-services.yml`.
-2. Verifica che le variabili GitHub (`SERVICES_PARENT_SLUG`, ecc.) siano allineate a `content/.publish.env`.
-3. Mantieni solo una sorgente di verita per slug e stati di pubblicazione.
-
-## 9) Demo Gestionale (Plugin WordPress)
-
-Nel repo e inclusa una demo plugin:
-
-- `wp-content/plugins/eda-manager-demo/eda-manager-demo.php`
-
-Funzioni demo incluse:
-
-- Dashboard admin (`EDA Manager`)
-- Catalogo servizi (una tantum / annuale)
-- Assegnazione servizi ai clienti (utenti WP)
-- Elenco rinnovi in scadenza
-- Ticket base (admin + cliente)
-- Reminder email giornaliero per rinnovi vicini
-- Shortcode area cliente: `[eda_client_portal]`
-- Shortcode tabella prezzi: `[eda_service_pricing]`
-
-### Installazione rapida su sito esistente
-
-1. Crea zip plugin dalla root repo:
-
-```bash
-cd wp-content/plugins
-zip -r eda-manager-demo.zip eda-manager-demo
-```
-
-2. In WordPress:
-   - `Plugin -> Aggiungi nuovo -> Carica plugin`
-   - carica `eda-manager-demo.zip`
-   - attiva plugin
-
-3. Crea una pagina cliente e inserisci shortcode:
-
-```text
-[eda_client_portal]
-```
-
-4. (Opzionale) nella pagina servizi o prezzi inserisci:
-
-```text
-[eda_service_pricing]
-```
-
-### Creazione automatica 2 pagine demo (senza passare dall'admin)
-
-```bash
-bash scripts/create-eda-demo-pages.sh
-```
-
-Pagine create/aggiornate:
-
-- `/area-cliente-demo/` con shortcode `[eda_client_portal]`
-- `/tabella-prezzi-servizi-demo/` con shortcode `[eda_service_pricing]`
 
 Note:
-- questa e una base demo, non un CRM completo;
-- per produzione conviene aggiungere ruoli/capability dedicate, audit log e notifiche avanzate.
-
-## 10) Gestionale Separato (Docker App) con Login WordPress
-
-Questa repo ora include anche un gestionale separato dal backend WordPress:
-
-- App Docker: `manager-app/`
-- Bridge SSO WordPress: `wp-content/plugins/eda-auth-bridge/eda-auth-bridge.php`
-
-Path pubblici previsti:
-
-- `https://<dominio>/gestionale` (admin)
-- `https://<dominio>/areapersonale` (cliente)
-- `https://<dominio>/areapersonale/registrazione` (registrazione custom)
-
-### Requisiti
-
-1. Variabili `.env`:
-
-```bash
-EDA_SSO_SECRET=metti-un-segreto-lungo-e-casuale
-SMTP_HOST=
-SMTP_PORT=587
-SMTP_USER=
-SMTP_PASS=
-SMTP_FROM=
-```
-
-2. Plugin WordPress da attivare (bridge auth):
-
-- zip folder `wp-content/plugins/eda-auth-bridge`
-- carica da `Plugin -> Aggiungi nuovo -> Carica plugin`
-- attiva `EDA Auth Bridge`
-
-3. Stack aggiornato:
-
-- `docker-compose.yml` include `manager-app`
-- routing Traefik su `/gestionale` e `/areapersonale`
-- `WORDPRESS_CONFIG_EXTRA` definisce `EDA_SSO_SECRET` in WP
-
-### Deploy
-
-```bash
-docker compose pull
-docker compose up -d
-```
-
-Se usi Portainer, aggiorna lo stack con il nuovo `docker-compose.yml`.
-
-### Portainer: cosa incollare nello Stack
-
-Usa il `docker-compose.yml` della repo aggiornato (include `db`, `redis`, `wordpress`, `manager-app`).
-
-Punti chiave:
-
-- `manager-app` usa immagine GHCR:
-  - `ghcr.io/${GHCR_OWNER}/${GHCR_IMAGE}-manager:latest`
-- WordPress usa:
-  - `ghcr.io/${GHCR_OWNER}/${GHCR_IMAGE}:latest` (oppure il valore fisso che preferisci)
-- In Portainer imposta anche le variabili env usate nello stack:
-  - `GHCR_OWNER`
-  - `GHCR_IMAGE`
-  - `WP_DOMAIN`
-  - `MYSQL_*`
-  - `WORDPRESS_TABLE_PREFIX`
-  - `REDIS_HOST`, `REDIS_PORT`
-  - `EDA_SSO_SECRET`
-  - `SMTP_*` (se vuoi reminder email reali)
-
-### Flusso login
-
-1. utente apre `/areapersonale` o `/gestionale`
-2. se non autenticato, redirect su endpoint WP `sso-start`
-3. WordPress richiede login standard
-4. redirect di ritorno all'app con token SSO
-5. app crea sessione e mostra dashboard personalizzata
-
-### Funzioni MVP incluse nell'app separata
-
-- Dashboard admin (KPI)
-- Gestione servizi
-- Assegnazione servizi ai clienti
-- Lista rinnovi in scadenza
-- Ticket base (admin e cliente)
-- Reminder email giornaliero (se SMTP configurato)
+- Il plugin supporta due modalita:
+  - default legacy: callback su `/gestionale/auth/callback` o `/areapersonale/auth/callback` del dominio WordPress.
+  - v2: se la richiesta include `target=v2`, usa `EDA_AUTH_CALLBACK_URL`.
+- Se `target=v2` ma `EDA_AUTH_CALLBACK_URL` non e configurato, la richiesta SSO fallisce con errore.
+- `EDA_SSO_SECRET` deve corrispondere al `JWT_SECRET` del backend NestJS.
