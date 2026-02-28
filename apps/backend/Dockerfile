@@ -9,4 +9,4 @@ RUN npm install
 RUN npm --workspace @eda/backend run prisma:generate
 
 EXPOSE 5050
-CMD ["npm", "--workspace", "@eda/backend", "run", "start:dev"]
+CMD ["sh", "-c", "npm --workspace @eda/backend run prisma:deploy && npm --workspace @eda/backend run start:dev"]

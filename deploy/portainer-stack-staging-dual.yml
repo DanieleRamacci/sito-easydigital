@@ -116,6 +116,9 @@ services:
     pull_policy: always
     depends_on:
       - postgres-v2
+    command: >
+      sh -c "npm --workspace @eda/backend run prisma:deploy &&
+             npm --workspace @eda/backend run start:dev"
     environment:
       DATABASE_URL: postgresql://${MGR_PG_USER}:${MGR_PG_PASSWORD}@postgres-v2:5432/${MGR_PG_DB}?schema=public
       JWT_SECRET: ${EDA_SSO_SECRET}
