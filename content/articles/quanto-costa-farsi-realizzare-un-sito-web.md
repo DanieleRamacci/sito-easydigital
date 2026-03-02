@@ -7,12 +7,12 @@ article_class: eda-articolo-costi-sito-web
 seo_title: Prezzo Sito Web 2026 | Quanto Costa Davvero un Sito Professionale
 seo_description: Prezzi sito web 2026: Business Starter 399 euro, Business Pro 899 euro, Business Enterprise da 1500 euro e progetti software fino a 10.000 euro.
 focus_keyword: quanto costa farsi realizzare un sito web
-canonical_url: https://staging.easydigitalagency.it/quanto-costa-farsi-realizzare-un-sito-web/
+canonical_url: https://www.easydigitalagency.it/quanto-costa-farsi-realizzare-un-sito-web/
 ai_entities: Prezzi sito web 2026, Preventivo sito web, WordPress, Sito vetrina, E-commerce, Sviluppo software custom, Easy Digital Agency
 ai_prompt: Spiegami in italiano quanto costa farsi realizzare un sito web nel 2026, includendo i pacchetti Business Starter, Pro, Enterprise e la fascia per sviluppo software custom.
 related_service_slugs: realizzazione-siti-web-professionali-roma,web-marketing-strategico,landing-page-ottimizzate-per-conversioni
 related_article_slugs:
-inline_links_html: <p><a href="/servizi-digital-agency-test/realizzazione-siti-web-professionali-roma/">Scopri il nostro servizio di realizzazione siti web professionali a Roma</a>.</p>
+inline_links_html: <p><a href="/servizi-digital-web-agency/realizzazione-siti-web-professionali-roma/">Scopri il nostro servizio di realizzazione siti web professionali a Roma</a>.</p>
 status: publish
 
 <section>

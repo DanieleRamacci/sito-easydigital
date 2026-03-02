@@ -75,6 +75,8 @@ Copia `.env.example` in `.env` e configura:
 - `WP_LOGIN_URL`
 - `APP_BASE_URL`
 - `APP_ORIGIN` (opzionale, default derivato da `APP_BASE_URL`)
+- `DEV_AUTH_BYPASS` (opzionale, per sviluppo locale senza login WordPress)
+- `DEV_AUTH_EMAIL`, `DEV_AUTH_DISPLAY_NAME`, `DEV_AUTH_ROLES` (opzionali, usati solo con bypass attivo)
 
 Per flusso SSO WordPress -> nuovo backend/frontend:
 - `WP_LOGIN_URL` deve puntare all'endpoint WordPress SSO in modalita v2, ad esempio: `https://wp.tuodominio.it/wp-json/eda-auth/v1/sso-start?next=/gestionale&target=v2`
@@ -182,6 +184,17 @@ npm --workspace @eda/backend run test
 - `GET /api/me` legge il JWT validato lato backend
 - Guard admin su route gestionali (`roles` include `administrator`)
 - `POST /api/logout` cancella cookie
+
+### Bypass locale (senza WordPress)
+
+Per test veloci in locale puoi disattivare il login WordPress impostando:
+
+```env
+DEV_AUTH_BYPASS=true
+DEV_AUTH_ROLES=administrator
+```
+
+Con questo flag il backend autentica automaticamente un utente locale sulle route protette, utile per provare CRUD (`/api/customers`, `/api/jobs`, ecc.) senza SSO.
 
 ### Bridge WordPress (plugin `eda-auth-bridge`)
 

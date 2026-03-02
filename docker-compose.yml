@@ -30,6 +30,12 @@ services:
       NODE_ENV: ${NODE_ENV:-development}
       WP_LOGIN_URL: ${WP_LOGIN_URL:-}
       APP_BASE_URL: ${APP_BASE_URL:-http://localhost:4200}
+      DEV_AUTH_BYPASS: ${DEV_AUTH_BYPASS:-false}
+      DEV_AUTH_USER_ID: ${DEV_AUTH_USER_ID:-local-dev-user}
+      DEV_AUTH_EMAIL: ${DEV_AUTH_EMAIL:-local-admin@easydigital.local}
+      DEV_AUTH_DISPLAY_NAME: ${DEV_AUTH_DISPLAY_NAME:-Local Admin}
+      DEV_AUTH_USERNAME: ${DEV_AUTH_USERNAME:-localadmin}
+      DEV_AUTH_ROLES: ${DEV_AUTH_ROLES:-administrator}
       BACKEND_PORT: 5050
     ports:
       - "5050:5050"

@@ -15,7 +15,7 @@ context_intro: Un sito web non e solo presenza online: e un asset di business. S
 seo_title: Realizzazione Sito Web a Roma | Easy Digital Agency
 seo_description: Servizio di realizzazione sito web a Roma con WordPress, Next.js, Strapi e LMS. Siti veloci, SEO-friendly e orientati alla conversione.
 focus_keyword: realizzazione sito web a roma
-canonical_url: https://staging.easydigitalagency.it/servizi-digital-agency-test/realizzazione-siti-web-professionali-roma/
+canonical_url: https://www.easydigitalagency.it/servizi-digital-web-agency/realizzazione-siti-web-professionali-roma/
 ai_entities: Realizzazione siti web, WordPress, Next.js, Strapi, LMS, SEO tecnica, Easy Digital Agency, Roma
 ai_prompt: Spiegami in italiano, in modo semplice e sintetico, il servizio di realizzazione sito web a Roma di Easy Digital Agency. Includi differenze tra WordPress, Next.js, Strapi e LMS, quando scegliere ciascuna soluzione, vantaggi SEO e tempi medi di sviluppo.
 related_service_slugs:

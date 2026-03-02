@@ -15,12 +15,12 @@ context_intro: Un sito web e un sistema vivo. Senza manutenzione tecnica rischi 
 seo_title: Gestione Annuale Sito Web e Assistenza Tecnica | Easy Digital Agency
 seo_description: Gestione annuale sito web: aggiornamenti WordPress, sicurezza, backup, privacy GDPR, email e supporto tecnico continuativo con canone chiaro.
 focus_keyword: gestione annuale sito web
-canonical_url: https://staging.easydigitalagency.it/servizi-digital-agency-test/gestione-annuale-sito-web-assistenza-tecnica/
+canonical_url: https://www.easydigitalagency.it/servizi-digital-web-agency/gestione-annuale-sito-web-assistenza-tecnica/
 ai_entities: Gestione annuale sito web, Assistenza tecnica WordPress, Backup, Sicurezza, GDPR, Iubenda, Email professionali, Easy Digital Agency
 ai_prompt: Spiegami il servizio di gestione annuale sito web di Easy Digital Agency, cosa include e perche conviene a professionisti e aziende.
 related_service_slugs: sicurezza-wordpress,privacy-policy-gdpr,realizzazione-siti-web-professionali-roma
 related_article_slugs: quanto-costa-farsi-realizzare-un-sito-web
-inline_links_html: <p>Scopri anche il servizio <a href="/servizi-digital-agency-test/sicurezza-wordpress/">Sicurezza WordPress</a> per la protezione avanzata del sito.</p>
+inline_links_html: <p>Scopri anche il servizio <a href="/servizi-digital-web-agency/sicurezza-wordpress/">Sicurezza WordPress</a> per la protezione avanzata del sito.</p>
 status: publish
 
 <section>

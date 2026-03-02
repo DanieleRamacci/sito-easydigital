@@ -15,7 +15,7 @@ context_intro: Se il tuo sito non compare tra i primi risultati, e come se non e
 seo_title: SEO e Posizionamento su Google a Roma | Easy Digital Agency
 seo_description: Consulenza SEO a Roma: analisi tecnica, keyword research, SEO on-page, contenuti e local SEO per aumentare traffico qualificato e contatti.
 focus_keyword: seo e posizionamento su google
-canonical_url: https://staging.easydigitalagency.it/servizi-digital-agency-test/seo-e-posizionamento-su-google/
+canonical_url: https://www.easydigitalagency.it/servizi-digital-web-agency/seo-e-posizionamento-su-google/
 ai_entities: SEO, Posizionamento su Google, Local SEO, Keyword research, SEO on-page, Google Business Profile, Easy Digital Agency, Roma
 ai_prompt: Spiegami in italiano, in modo semplice, il servizio SEO e posizionamento su Google di Easy Digital Agency e quando conviene attivarlo per un business locale.
 related_service_slugs: realizzazione-siti-web-professionali-roma,web-marketing-strategico,gestione-annuale-sito-web-assistenza-tecnica
