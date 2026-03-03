@@ -67,6 +67,19 @@ status: publish
 </section>
 
 <section>
+  <h2>Cosa include operativamente durante l'anno</h2>
+  <ul>
+    <li>Verifica programmata aggiornamenti WordPress e compatibilita plugin.</li>
+    <li>Controllo uptime e gestione anomalie segnalate da utenti o monitoraggi.</li>
+    <li>Routine backup con verifica periodica del ripristino.</li>
+    <li>Supporto tecnico su richieste ricorrenti di sito, dominio ed email.</li>
+    <li>Allineamento continuo su sicurezza e conformita tecnica di base.</li>
+  </ul>
+  <p>Per best practice ufficiali sulla manutenzione WordPress, puoi consultare anche la documentazione di hardening: <a href="https://wordpress.org/support/article/hardening-wordpress/" target="_blank" rel="noopener noreferrer">WordPress Hardening Guide</a>.</p>
+  <p>Se vuoi valutare anche costi e scope di sviluppo, leggi: <a href="/quanto-costa-farsi-realizzare-un-sito-web/">Quanto costa farsi realizzare un sito web?</a></p>
+</section>
+
+<section>
   <h2>Domande frequenti</h2>
   <h3>Potete gestire un sito sviluppato da altri?</h3>
   <p>Si. Partiamo da un audit tecnico e prendiamo in carico il progetto in modo ordinato.</p>

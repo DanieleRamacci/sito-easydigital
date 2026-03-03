@@ -68,6 +68,19 @@ status: publish
 </section>
 
 <section>
+  <h2>Output concreti e metriche che monitoriamo</h2>
+  <ul>
+    <li>Stato indicizzazione pagine strategiche e copertura sitemap.</li>
+    <li>Evoluzione keyword prioritarie per intent commerciale e informativo.</li>
+    <li>Traffico organico qualificato e conversioni da ricerca.</li>
+    <li>Core Web Vitals e criticita tecniche con impatto SEO.</li>
+    <li>Qualita linking interno tra servizi e articoli di supporto.</li>
+  </ul>
+  <p>Per linee guida ufficiali sulle pratiche SEO consigliate puoi consultare anche la documentazione Google Search Central: <a href="https://developers.google.com/search/docs/fundamentals/seo-starter-guide" target="_blank" rel="noopener noreferrer">SEO Starter Guide</a>.</p>
+  <p>Per una strategia completa, integriamo spesso SEO con <a href="/servizi-digital-web-agency/web-marketing-strategico/">web marketing strategico</a> e con <a href="/servizi-digital-web-agency/landing-page-ottimizzate-per-conversioni/">landing page ottimizzate per conversioni</a>.</p>
+</section>
+
+<section>
   <h2>FAQ SEO</h2>
   <h3>Quanto tempo serve per vedere risultati SEO?</h3>
   <p>Dipende dalla concorrenza e dallo stato iniziale del sito. In genere i primi segnali arrivano in poche settimane, con crescita piu solida nel medio periodo.</p>

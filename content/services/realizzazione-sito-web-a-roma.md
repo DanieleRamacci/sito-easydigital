@@ -81,6 +81,7 @@ status: publish
     <li>Sviluppo plugin custom per funzioni specifiche.</li>
     <li>Integrazioni con CRM, gestionali, fatturazione, ordini e magazzino.</li>
   </ul>
+  <p class="eda-text-justify">Per valutare performance reali e priorita tecniche usiamo strumenti standard di settore come PageSpeed Insights: <a href="https://pagespeed.web.dev/" target="_blank" rel="noopener noreferrer">pagespeed.web.dev</a>.</p>
 </section>
 
 <section>
