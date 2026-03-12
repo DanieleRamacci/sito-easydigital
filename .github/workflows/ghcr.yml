@@ -79,23 +79,3 @@ jobs:
           push: true
           tags: ${{ steps.meta_backend_v2.outputs.tags }}
           labels: ${{ steps.meta_backend_v2.outputs.labels }}
-
-      - name: Docker metadata (Frontend v2)
-        id: meta_frontend_v2
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ github.event.repository.name }}-frontend
-          tags: |
-            type=raw,value=latest
-            type=sha
-
-      - name: Build and push (Frontend v2)
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: apps/frontend/Dockerfile
-          push: true
-          build-args: |
-            APP_SUBPATH=gestionale-2
-          tags: ${{ steps.meta_frontend_v2.outputs.tags }}
-          labels: ${{ steps.meta_frontend_v2.outputs.labels }}
