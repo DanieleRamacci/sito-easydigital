@@ -1,0 +1,18 @@
+{% if rows %}
+<table class="tbl">
+  <thead><tr><th>Azienda</th><th>Referente</th><th>Email</th><th>Telefono</th><th>Stato</th></tr></thead>
+  <tbody>
+    {% for c in rows %}
+      <tr>
+        <td>{{ c.company or '-' }}</td>
+        <td>{{ (c.first_name or '') ~ ' ' ~ (c.last_name or '') }}</td>
+        <td>{{ c.email or '-' }}</td>
+        <td>{{ c.phone or '-' }}</td>
+        <td>{{ c.status or '-' }}</td>
+      </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">Nessun cliente trovato.</p>
+{% endif %}

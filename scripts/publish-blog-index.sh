@@ -58,6 +58,45 @@ upsert_page() {
   fi
 }
 
+to_gutenberg_blocks() {
+  local raw="$1"
+  local wa_shortcode='[njwa_button id="1255"]'
+
+  if [[ "${raw}" == *"<!-- wp:"* ]]; then
+    printf "%s" "${raw}"
+    return 0
+  fi
+
+  if [[ "${raw}" == *"${wa_shortcode}"* ]]; then
+    RAW_INPUT="${raw}" WA_SHORTCODE="${wa_shortcode}" python3 - <<'PY'
+import os
+
+raw = os.environ.get("RAW_INPUT", "")
+needle = os.environ.get("WA_SHORTCODE", "")
+parts = raw.split(needle, 1)
+
+if len(parts) == 2:
+    before, after = parts
+    print("<!-- wp:html -->")
+    print(before)
+    print("<!-- /wp:html -->")
+    print("<!-- wp:shortcode -->")
+    print(needle)
+    print("<!-- /wp:shortcode -->")
+    print("<!-- wp:html -->")
+    print(after)
+    print("<!-- /wp:html -->")
+else:
+    print("<!-- wp:html -->")
+    print(raw)
+    print("<!-- /wp:html -->")
+PY
+    return 0
+  fi
+
+  printf "<!-- wp:html -->\n%s\n<!-- /wp:html -->" "${raw}"
+}
+
 tmp_render="$(mktemp)"
 trap 'rm -f "${tmp_render}"' EXIT
 
@@ -220,6 +259,7 @@ print(content)
 PY
 
 content="$(cat "${tmp_render}")"
+content="$(to_gutenberg_blocks "${content}")"
 
 upsert_page "${BLOG_INDEX_SLUG}" "${BLOG_INDEX_TITLE}" "${content}" "${BLOG_INDEX_INTRO}" "${BLOG_INDEX_STATUS}" "${BLOG_INDEX_TEMPLATE}"
 

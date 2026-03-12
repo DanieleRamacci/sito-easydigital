@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Lavori</h1>
+<form class="filters" hx-get="/gestionale/lavori/table" hx-target="#jobs-table" hx-trigger="keyup changed delay:300ms from:input, change from:select">
+  <input type="text" name="q" placeholder="Cerca cliente, titolo, note" value="{{ q }}" />
+  <select name="status">
+    <option value="">Tutti gli stati</option>
+    {% for key, label in statuses.items() %}
+      <option value="{{ key }}" {% if status==key %}selected{% endif %}>{{ label }}</option>
+    {% endfor %}
+  </select>
+</form>
+<div id="jobs-table" class="card">{% include "partials/jobs_table.html" %}</div>
+{% endblock %}

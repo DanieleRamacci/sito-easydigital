@@ -1,0 +1,18 @@
+{% if rows %}
+<table class="tbl">
+  <thead><tr><th>ID</th><th>Cliente</th><th>Oggetto</th><th>Stato</th><th>Data</th></tr></thead>
+  <tbody>
+    {% for t in rows %}
+      <tr>
+        <td>{{ t.id }}</td>
+        <td>{{ t.customer_label }}</td>
+        <td>{{ t.subject or '-' }}</td>
+        <td>{{ t.status or '-' }}</td>
+        <td>{{ fmt_date(t.createdAt) }}</td>
+      </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">Nessun ticket trovato.</p>
+{% endif %}

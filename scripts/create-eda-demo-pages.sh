@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+echo "Script dismesso: le pagine demo non devono piu essere create in produzione."
+echo "Usa scripts/remove-legacy-demo-pages.sh per pulire le pagine legacy."
+exit 1
+
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="${ROOT_DIR}/content/.publish.env"
 

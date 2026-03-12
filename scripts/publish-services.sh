@@ -94,6 +94,58 @@ csv_to_things_json() {
   printf "%s" "${out}"
 }
 
+extract_faq_pairs() {
+  local html="$1"
+  perl -0777 -ne '
+    sub clean {
+      my ($s) = @_;
+      $s =~ s/<[^>]+>/ /g;
+      $s =~ s/&nbsp;/ /gi;
+      $s =~ s/&amp;/&/gi;
+      $s =~ s/&quot;/"/gi;
+      $s =~ s/&#39;/'\''/gi;
+      $s =~ s/&rsquo;/'\''/gi;
+      $s =~ s/&ldquo;/"/gi;
+      $s =~ s/&rdquo;/"/gi;
+      $s =~ s/\s+/ /g;
+      $s =~ s/^\s+|\s+$//g;
+      return $s;
+    }
+
+    my $html = $_;
+    while ($html =~ m{<h2[^>]*>\s*(.*?)\s*</h2>(.*?)(?=<h2\b|$)}isg) {
+      my ($heading, $block) = (clean($1), $2);
+      next unless $heading =~ /(faq|domande frequenti|frequently asked questions)/i;
+      while ($block =~ m{<h3[^>]*>\s*(.*?)\s*</h3>\s*<p[^>]*>\s*(.*?)\s*</p>}isg) {
+        my ($q, $a) = (clean($1), clean($2));
+        next unless length($q) && length($a);
+        print "$q\t$a\n";
+      }
+    }
+  ' <<< "${html}"
+}
+
+build_faq_entities_json_from_body() {
+  local body="$1"
+  local out="["
+  local first=1
+  local q a q_e a_e
+
+  while IFS=$'\t' read -r q a; do
+    [[ -n "${q}" && -n "${a}" ]] || continue
+    q_e="$(escape_json_string "${q}")"
+    a_e="$(escape_json_string "${a}")"
+    if [[ ${first} -eq 0 ]]; then
+      out="${out},"
+    fi
+    out="${out}{\"@type\":\"Question\",\"name\":\"${q_e}\",\"acceptedAnswer\":{\"@type\":\"Answer\",\"text\":\"${a_e}\"}}"
+    first=0
+  done < <(extract_faq_pairs "${body}")
+
+  out="${out}]"
+  printf "%s" "${out}"
+}
+
 get_page_id_by_slug() {
   local slug="$1"
   local response
@@ -356,6 +408,11 @@ while IFS=$'\t' read -r _cat _ord file; do
   service_url_escaped="$(escape_json_string "${service_url}")"
   site_base_escaped="$(escape_json_string "${WP_BASE_URL%/}")"
   ai_entities_json="$(csv_to_things_json "${ai_entities}")"
+  faq_entities_json="$(build_faq_entities_json_from_body "${body}")"
+  faq_schema_block=""
+  if [[ "${faq_entities_json}" != "[]" ]]; then
+    faq_schema_block=",{\"@type\":\"FAQPage\",\"mainEntity\":${faq_entities_json}}"
+  fi
   related_services_section="$(render_related_services_section "${related_service_slugs}")"
   related_articles_section="$(render_related_articles_section "${related_article_slugs}")"
   inline_links_section=""
@@ -384,6 +441,7 @@ while IFS=$'\t' read -r _cat _ord file; do
   page_content="${page_content//__RELATED_SERVICES_SECTION__/${related_services_section}}"
   page_content="${page_content//__RELATED_ARTICLES_SECTION__/${related_articles_section}}"
   page_content="${page_content//__AI_PROMPT__/${ai_prompt_escaped}}"
+  page_content="${page_content//__FAQ_SCHEMA_BLOCK__/${faq_schema_block}}"
 
   upsert_page "${slug}" "${title}" "${page_content}" "${excerpt}" "${status}" "${PARENT_ID}" "${SERVICE_PAGE_TEMPLATE}"
   page_id="$(get_page_id_by_slug "${slug}")"

@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Clienti</h1>
+<form class="filters" hx-get="/gestionale/clienti/table" hx-target="#customers-table" hx-trigger="keyup changed delay:300ms from:input, change from:select">
+  <input type="text" name="q" placeholder="Cerca azienda, email, telefono" value="{{ q }}" />
+  <select name="status">
+    <option value="">Tutti gli stati</option>
+    <option value="lead" {% if status=='lead' %}selected{% endif %}>Lead</option>
+    <option value="invited" {% if status=='invited' %}selected{% endif %}>Invited</option>
+    <option value="active" {% if status=='active' %}selected{% endif %}>Active</option>
+  </select>
+</form>
+<div id="customers-table" class="card">{% include "partials/customers_table.html" %}</div>
+{% endblock %}

@@ -32,7 +32,7 @@ status: publish
 <section>
   <h2>Tecnologie che usiamo per la realizzazione sito web</h2>
   <ul>
-    <li><strong>WordPress:</strong> perfetto per siti vetrina, blog, landing page e piccoli e-commerce.</li>
+    <li><strong>WordPress:</strong> perfetto per siti vetrina, blog, landing page e siti corporate.</li>
     <li><strong>Next.js:</strong> ideale per siti super veloci, SEO-friendly e con performance elevate.</li>
     <li><strong>Strapi (headless CMS):</strong> massima liberta di sviluppo e flussi personalizzati.</li>
     <li><strong>LMS:</strong> piattaforme per corsi online, scuole, formazione aziendale e accademie.</li>
@@ -67,7 +67,7 @@ status: publish
   </ul>
   <h3>Plugin: pro e contro</h3>
   <ul>
-    <li><strong>Pro:</strong> funzionalita pronte (SEO, form, e-commerce, prenotazioni) con tempi ridotti.</li>
+    <li><strong>Pro:</strong> funzionalita pronte (SEO, form, prenotazioni, aree riservate) con tempi ridotti.</li>
     <li><strong>Contro:</strong> alcuni plugin richiedono licenze annuali e manutenzione costante.</li>
   </ul>
   <p class="eda-text-justify">Selezioniamo solo plugin affidabili e supportati per garantire stabilita, sicurezza e aggiornamenti continui.</p>
@@ -89,7 +89,7 @@ status: publish
   <ul>
     <li><strong>Landing page:</strong> per campagne adv, lead generation e lanci prodotto.</li>
     <li><strong>Siti vetrina:</strong> per presentare servizi in modo chiaro e professionale.</li>
-    <li><strong>E-commerce:</strong> WooCommerce o soluzioni headless orientate alla conversione.</li>
+    <li><strong>Siti corporate avanzati:</strong> strutture multi-servizio con funnel di acquisizione orientati a lead qualificati.</li>
     <li><strong>Portali e-learning:</strong> corsi online con quiz, certificati, pagamenti e reportistica.</li>
   </ul>
 </section>
@@ -125,7 +125,7 @@ status: publish
   <h3>Qual e la piattaforma migliore per creare un sito web?</h3>
   <p>Non esiste una piattaforma migliore in assoluto: scegliamo WordPress, Next.js o soluzioni headless in base a obiettivi, tempi e budget.</p>
   <h3>Quanto tempo ci vuole per realizzare un sito web?</h3>
-  <p>Un sito base richiede da pochi giorni a 2-3 settimane. Progetti custom o e-commerce con integrazioni richiedono tempi maggiori.</p>
+  <p>Un sito base richiede da pochi giorni a 2-3 settimane. Progetti custom con integrazioni e workflow dedicati richiedono tempi maggiori.</p>
 </section>
 
 <aside style="border-left: 5px solid #3dae63; background-color: #ecf7f0; padding: 20px; margin-top: 30px; margin-bottom: 30px; border-radius: 5px;">

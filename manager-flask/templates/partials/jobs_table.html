@@ -1,0 +1,19 @@
+{% if rows %}
+<table class="tbl">
+  <thead><tr><th>Cliente</th><th>Titolo</th><th>Servizi</th><th>Stato</th><th>Scadenza</th><th>Importo</th></tr></thead>
+  <tbody>
+    {% for j in rows %}
+      <tr>
+        <td>{{ j.customer_name or '-' }}</td>
+        <td>{{ j.title or '-' }}</td>
+        <td>{{ j.services_label or '-' }}</td>
+        <td>{{ j.status_label or j.status or '-' }}</td>
+        <td>{{ fmt_date(j.dueDate or '') }}</td>
+        <td>{{ fmt_money(j.amount) }}</td>
+      </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">Nessun lavoro trovato.</p>
+{% endif %}

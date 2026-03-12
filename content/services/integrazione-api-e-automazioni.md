@@ -24,7 +24,7 @@ status: publish
 <section>
   <h2>Integrazione API e automazioni: collega strumenti e riduci lavoro manuale</h2>
   <p class="eda-section-lead eda-text-justify">Con una corretta <strong>integrazione API e automazioni</strong> puoi eliminare attività ripetitive, ridurre errori operativi e accelerare processi chiave come lead management, ordini, fatturazione e aggiornamento dati tra sistemi.</p>
-  <p class="eda-text-justify">Quando CRM, sito, gestionale, e-commerce e piattaforme marketing non comunicano bene, il team perde tempo in copie manuali, controlli incrociati e fix continui. Il risultato e un costo operativo nascosto che cresce nel tempo. Con un progetto strutturato di integrazione API e automazioni riporti coerenza nei dati e stabilità nei flussi.</p>
+  <p class="eda-text-justify">Quando CRM, sito, gestionale e piattaforme marketing non comunicano bene, il team perde tempo in copie manuali, controlli incrociati e fix continui. Il risultato e un costo operativo nascosto che cresce nel tempo. Con un progetto strutturato di integrazione API e automazioni riporti coerenza nei dati e stabilità nei flussi.</p>
 </section>
 
 <section>

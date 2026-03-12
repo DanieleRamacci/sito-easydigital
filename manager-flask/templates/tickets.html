@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Ticket</h1>
+<form class="filters" hx-get="/gestionale/ticket/table" hx-target="#tickets-table" hx-trigger="keyup changed delay:300ms from:input, change from:select">
+  <input type="text" name="q" placeholder="Cerca cliente o oggetto" value="{{ q }}" />
+  <select name="status">
+    <option value="">Tutti</option>
+    <option value="open" {% if status=='open' %}selected{% endif %}>Open</option>
+    <option value="in_progress" {% if status=='in_progress' %}selected{% endif %}>In progress</option>
+    <option value="closed" {% if status=='closed' %}selected{% endif %}>Closed</option>
+  </select>
+</form>
+<div id="tickets-table" class="card">{% include "partials/tickets_table.html" %}</div>
+{% endblock %}

@@ -1,0 +1,21 @@
+{% if rows %}
+<table class="tbl">
+  <thead><tr><th>Cliente</th><th>Voce</th><th>Tipo</th><th>Scadenza</th><th>Totale</th><th>Pagato</th><th>Residuo</th><th>Stato</th></tr></thead>
+  <tbody>
+    {% for d in rows %}
+      <tr>
+        <td>{{ d.customer_name }}</td>
+        <td>{{ d.item_name }}</td>
+        <td>{{ 'Ricorrente' if d.item_type == 'subscription' else 'Una tantum' }}</td>
+        <td>{{ fmt_date(d.due_date) }}</td>
+        <td>{{ fmt_money(d.amount_total) }}</td>
+        <td>{{ fmt_money(d.amount_paid) }}</td>
+        <td>{{ fmt_money(d.outstanding) }}</td>
+        <td>{{ 'Pagato' if d.payment_status == 'paid' else 'In attesa' }}</td>
+      </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">Nessun debito trovato.</p>
+{% endif %}

@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Dashboard</h1>
+<section class="kpi-grid">
+  <article class="kpi"><div>Clienti</div><strong>{{ kpi.customers }}</strong></article>
+  <article class="kpi"><div>Lavori</div><strong>{{ kpi.jobs }}</strong></article>
+  <article class="kpi"><div>Ticket Aperti</div><strong>{{ kpi.tickets_open }}</strong></article>
+  <article class="kpi"><div>Debito Residuo</div><strong>{{ fmt_money(kpi.debt_outstanding) }}</strong></article>
+</section>
+
+<section class="card">
+  <h2>Ultimi Lavori</h2>
+  {% include "partials/jobs_table.html" with context %}
+</section>
+<section class="card">
+  <h2>Debiti in evidenza</h2>
+  {% include "partials/debts_table.html" with context %}
+</section>
+<section class="card">
+  <h2>Clienti recenti</h2>
+  {% include "partials/customers_table.html" with context %}
+</section>
+<section class="card">
+  <h2>Ticket recenti</h2>
+  {% include "partials/tickets_table.html" with context %}
+</section>
+{% endblock %}

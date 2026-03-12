@@ -44,31 +44,5 @@ services:
              npm --workspace @eda/backend run prisma:generate &&
              npm --workspace @eda/backend run start:dev"
 
-  frontend:
-    image: node:20-alpine
-    container_name: eda_frontend
-    working_dir: /workspace
-    restart: unless-stopped
-    depends_on:
-      - backend
-    volumes:
-      - ./:/workspace
-    environment:
-      NODE_ENV: development
-    ports:
-      - "4200:4200"
-    command: sh -c "npm install && npm --workspace @eda/frontend run start"
-
-  frontend-prod:
-    build:
-      context: .
-      dockerfile: apps/frontend/Dockerfile
-    container_name: eda_frontend_prod
-    profiles: ["prod"]
-    depends_on:
-      - backend
-    ports:
-      - "8088:80"
-
 volumes:
   postgres_data:

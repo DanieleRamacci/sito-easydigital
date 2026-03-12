@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "docker compose up --build",
     "dev:backend": "npm --workspace @eda/backend run start:dev",
-    "dev:frontend": "npm --workspace @eda/frontend run start",
+    "dev:flask": "cd manager-flask && python3 app.py",
     "build": "npm -ws run build",
     "test": "npm -ws run test"
   }
