@@ -13,22 +13,31 @@ from flask_mail import Message
 
 from ..auth import require_admin, require_customer, sanitize_next
 from ..extensions import db, mail
-from ..models import Customer, DebtItem, Invite, Notification, Service, Subscription
+from ..models import Customer, DebtItem, Invite, Job, Notification, Service, Subscription
 from ..services.query import (
     BILLING_INTERVAL_LABELS,
     JOB_STATUS_LABELS,
+    add_customer_note,
+    add_job_note,
     add_payment,
     advance_renewal,
+    create_customer,
     create_invite,
+    create_job,
+    create_service,
+    create_ticket,
     customer_area_data,
     customer_detail_data,
     customers_query,
     dashboard_data,
     debt_rows_query,
+    delete_customer,
+    delete_job,
     enum_value,
     format_date_it,
     get_all_services,
     get_invite_by_token,
+    job_detail_data,
     jobs_query,
     mark_notification_read,
     parse_date,
@@ -37,9 +46,15 @@ from ..services.query import (
     process_renewals,
     register_wp_user,
     renewals_query,
+    services_query,
     subscriptions_query,
     tickets_query,
+    toggle_job_payment,
+    update_customer,
+    update_job,
+    update_job_note,
     update_job_status,
+    update_service_price,
     update_ticket_status,
     upsert_debt_from_subscription,
 )
@@ -616,5 +631,263 @@ def areapersonale():
 @bp.get("/registrazione/<token>")
 def registration_legacy_redirect(token: str):
     return redirect(f"/areapersonale/invito?token={token}")
+
+
+# ---------------------------------------------------------------------------
+# Clienti — CRUD
+# ---------------------------------------------------------------------------
+
+@bp.get("/gestionale/clienti/nuovo")
+@require_admin
+def customer_new_page():
+    return render_template(
+        "customer_form.html",
+        title=current_app.config["APP_TITLE"],
+        customer=None,
+    )
+
+
+@bp.post("/gestionale/clienti/nuovo")
+@require_admin
+def customer_new_submit():
+    company = (request.form.get("company") or "").strip()
+    email = (request.form.get("email") or "").strip().lower()
+    if not company or not email:
+        return render_template(
+            "customer_form.html",
+            title=current_app.config["APP_TITLE"],
+            customer=None,
+            error="Azienda e email sono obbligatori.",
+        )
+    try:
+        customer = create_customer(request.form)
+    except Exception:
+        db.session.rollback()
+        return render_template(
+            "customer_form.html",
+            title=current_app.config["APP_TITLE"],
+            customer=None,
+            error="Email già presente nel sistema.",
+        )
+    return redirect(f"/gestionale/clienti/{customer.id}")
+
+
+@bp.post("/gestionale/clienti/<int:customer_id>/modifica")
+@require_admin
+def customer_edit_submit(customer_id: int):
+    updated = update_customer(customer_id, request.form)
+    if not updated:
+        return "Cliente non trovato", 404
+    return redirect(f"/gestionale/clienti/{customer_id}")
+
+
+@bp.post("/gestionale/clienti/<int:customer_id>/elimina")
+@require_admin
+def customer_delete(customer_id: int):
+    ok = delete_customer(customer_id)
+    if not ok:
+        return "Cliente non trovato", 404
+    return redirect("/gestionale/clienti")
+
+
+@bp.post("/gestionale/clienti/<int:customer_id>/note")
+@require_admin
+def customer_note_add(customer_id: int):
+    text = (request.form.get("text") or "").strip()
+    if text:
+        add_customer_note(customer_id, text)
+    return redirect(f"/gestionale/clienti/{customer_id}#sec-note")
+
+
+# ---------------------------------------------------------------------------
+# Lavori — CRUD + Detail
+# ---------------------------------------------------------------------------
+
+@bp.get("/gestionale/lavori/nuovo")
+@require_admin
+def job_new_page():
+    services = get_all_services()
+    all_customers = customers_query(q="", status="")
+    preselect = request.args.get("customer_id", "")
+    return render_template(
+        "job_form.html",
+        title=current_app.config["APP_TITLE"],
+        job=None,
+        services=services,
+        customers=all_customers,
+        statuses=JOB_STATUS_LABELS,
+        preselect_customer=preselect,
+    )
+
+
+@bp.post("/gestionale/lavori/nuovo")
+@require_admin
+def job_new_submit():
+    title = (request.form.get("title") or "").strip()
+    customer_id = int(request.form.get("customer_id") or 0)
+    if not title or not customer_id:
+        services = get_all_services()
+        all_customers = customers_query(q="", status="")
+        return render_template(
+            "job_form.html",
+            title=current_app.config["APP_TITLE"],
+            job=None,
+            services=services,
+            customers=all_customers,
+            statuses=JOB_STATUS_LABELS,
+            preselect_customer="",
+            error="Titolo e cliente sono obbligatori.",
+        )
+    job = create_job(request.form)
+    return redirect(f"/gestionale/lavori/{job.id}")
+
+
+@bp.get("/gestionale/lavori/<int:job_id>")
+@require_admin
+def job_detail_page(job_id: int):
+    data = job_detail_data(job_id)
+    if not data:
+        return "Lavoro non trovato", 404
+    services = get_all_services()
+    all_customers = customers_query(q="", status="")
+    return render_template(
+        "job_detail.html",
+        title=current_app.config["APP_TITLE"],
+        services=services,
+        customers=all_customers,
+        statuses=JOB_STATUS_LABELS,
+        **data,
+    )
+
+
+@bp.get("/gestionale/lavori/<int:job_id>/modifica")
+@require_admin
+def job_edit_page(job_id: int):
+    job = db.session.get(Job, job_id)
+    if not job:
+        return "Lavoro non trovato", 404
+    services = get_all_services()
+    all_customers = customers_query(q="", status="")
+    return render_template(
+        "job_form.html",
+        title=current_app.config["APP_TITLE"],
+        job=job,
+        services=services,
+        customers=all_customers,
+        statuses=JOB_STATUS_LABELS,
+        preselect_customer="",
+    )
+
+
+@bp.post("/gestionale/lavori/<int:job_id>/modifica")
+@require_admin
+def job_edit_submit(job_id: int):
+    updated = update_job(job_id, request.form)
+    if not updated:
+        return "Lavoro non trovato", 404
+    return redirect(f"/gestionale/lavori/{job_id}")
+
+
+@bp.post("/gestionale/lavori/<int:job_id>/elimina")
+@require_admin
+def job_delete(job_id: int):
+    job = db.session.get(Job, job_id)
+    customer_id = job.customer_id if job else None
+    ok = delete_job(job_id)
+    if not ok:
+        return "Lavoro non trovato", 404
+    if customer_id:
+        return redirect(f"/gestionale/clienti/{customer_id}")
+    return redirect("/gestionale/lavori")
+
+
+@bp.post("/gestionale/lavori/<int:job_id>/note")
+@require_admin
+def job_note_add(job_id: int):
+    text = (request.form.get("text") or "").strip()
+    if text:
+        add_job_note(job_id, text)
+    return redirect(f"/gestionale/lavori/{job_id}#tab-note")
+
+
+@bp.post("/gestionale/lavori/<int:job_id>/note/<int:note_id>/modifica")
+@require_admin
+def job_note_edit(job_id: int, note_id: int):
+    text = (request.form.get("text") or "").strip()
+    if text:
+        update_job_note(note_id, text)
+    return redirect(f"/gestionale/lavori/{job_id}#tab-note")
+
+
+@bp.post("/gestionale/lavori/<int:job_id>/pagamento")
+@require_admin
+def job_toggle_payment(job_id: int):
+    toggle_job_payment(job_id)
+    ref = request.referrer or ""
+    if ref:
+        return redirect(ref)
+    return redirect(f"/gestionale/lavori/{job_id}")
+
+
+# ---------------------------------------------------------------------------
+# Servizi
+# ---------------------------------------------------------------------------
+
+@bp.get("/gestionale/servizi")
+@require_admin
+def services_page():
+    rows = services_query()
+    return render_template(
+        "services.html",
+        title=current_app.config["APP_TITLE"],
+        rows=rows,
+    )
+
+
+@bp.post("/gestionale/servizi/nuovo")
+@require_admin
+def service_new_submit():
+    name = (request.form.get("name") or "").strip()
+    if not name:
+        return redirect("/gestionale/servizi")
+    create_service(request.form)
+    return redirect("/gestionale/servizi")
+
+
+@bp.post("/gestionale/servizi/<int:service_id>/prezzo")
+@require_admin
+def service_price_update(service_id: int):
+    new_price = request.form.get("price") or 0
+    note = (request.form.get("note") or "").strip()
+    update_service_price(service_id, new_price, note)
+    return redirect("/gestionale/servizi")
+
+
+# ---------------------------------------------------------------------------
+# Area personale — ticket
+# ---------------------------------------------------------------------------
+
+@bp.post("/areapersonale/ticket/nuovo")
+@require_customer
+def areapersonale_ticket_new():
+    from flask import g
+    wp_user_id = int(g.user.get("sub") or 0)
+    user_email = str(g.user.get("email") or "").lower()
+
+    subject = (request.form.get("subject") or "").strip()
+    message = (request.form.get("message") or "").strip()
+    if not subject or not message:
+        return redirect("/areapersonale")
+
+    from ..models import Customer as _Customer
+    customer = None
+    if wp_user_id:
+        customer = _Customer.query.filter_by(wp_user_id=wp_user_id).first()
+    if not customer and user_email:
+        customer = _Customer.query.filter(_Customer.email == user_email).first()
+
+    customer_id = customer.id if customer else None
+    create_ticket(customer_id, subject, message)
+    return redirect("/areapersonale")
 
 

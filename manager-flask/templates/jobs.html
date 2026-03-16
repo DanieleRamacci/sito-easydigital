@@ -1,6 +1,13 @@
 {% extends "base.html" %}
 {% block content %}
-<h1>Lavori</h1>
+<div class="page-header">
+  <div>
+    <h1>Lavori</h1>
+  </div>
+  <div class="header-actions">
+    <a href="/gestionale/lavori/nuovo" class="btn btn-sm">+ Nuovo lavoro</a>
+  </div>
+</div>
 <form class="filters" hx-get="/gestionale/lavori/table" hx-target="#jobs-table" hx-trigger="keyup changed delay:300ms from:input, change from:select">
   <input type="text" name="q" placeholder="Cerca cliente, titolo, note" value="{{ q }}" />
   <select name="status">

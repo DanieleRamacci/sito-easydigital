@@ -1,0 +1,229 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <a href="/gestionale/lavori" class="back-link">← Lavori</a>
+    <h1>{{ job.title }}</h1>
+    {% if customer %}
+    <div class="muted" style="font-size:.9rem;">
+      Cliente: <a href="/gestionale/clienti/{{ customer.id }}">{{ customer.company or ((customer.first_name or '') ~ ' ' ~ (customer.last_name or '')) }}</a>
+    </div>
+    {% endif %}
+  </div>
+  <div class="header-actions">
+    {% if customer %}
+    <a href="/gestionale/clienti/{{ customer.id }}" class="btn btn-sm btn-outline">Vai al cliente</a>
+    {% endif %}
+    <a href="/gestionale/lavori/{{ job.id }}/modifica" class="btn btn-sm btn-outline">Modifica</a>
+    <form method="POST" action="/gestionale/lavori/{{ job.id }}/elimina"
+      onsubmit="return confirm('Eliminare questo lavoro e tutti i dati collegati?');" style="display:inline">
+      <button type="submit" class="btn btn-sm btn-danger">Elimina</button>
+    </form>
+  </div>
+</div>
+
+<!-- Pipeline visuale -->
+<div class="pipeline card">
+  {% set stages = [
+    ('qualificazione_preventivo', 'Qualificazione'),
+    ('scrittura_preventivo', 'Preventivo'),
+    ('in_lavorazione', 'Lavorazione'),
+    ('in_attesa_pagamento', 'Attesa pag.'),
+    ('gestione_annuale', 'Gestione ann.'),
+    ('chiusa_acquisita', 'Chiusa ✓'),
+    ('chiusa_persa', 'Chiusa ✗'),
+  ] %}
+  {% set current_status = job.status.value if job.status and job.status.__class__.__name__ == 'JobStatus' else job.status %}
+  {% set stage_keys = stages | map(attribute=0) | list %}
+  {% set current_idx = stage_keys.index(current_status) if current_status in stage_keys else 0 %}
+  {% for key, label in stages %}
+  {% set idx = loop.index0 %}
+  <div class="pipeline-step {% if idx == current_idx %}active{% elif idx < current_idx %}done{% endif %}">
+    <div class="pipeline-dot"></div>
+    <div class="pipeline-label">{{ label }}</div>
+  </div>
+  {% endfor %}
+</div>
+
+<!-- Aggiornamento rapido stato -->
+<div class="card" style="margin-bottom:14px;">
+  <form method="POST" action="/gestionale/lavori/{{ job.id }}/status" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+    <span style="font-weight:600;font-size:.9rem;">Cambia stato:</span>
+    <select name="status" style="flex:1;min-width:200px;max-width:320px;">
+      {% for key, label in statuses.items() %}
+      <option value="{{ key }}" {% if job.status == key %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+    <button type="submit" class="btn btn-sm">Aggiorna fase</button>
+    <form method="POST" action="/gestionale/lavori/{{ job.id }}/pagamento" style="display:inline;margin:0;">
+      <button type="submit" class="btn btn-sm {% if job.payment_status == 'paid' %}btn-outline{% endif %}">
+        {% if job.payment_status == 'paid' %}
+        <span class="badge badge-paid">Pagato</span> — Segna non pagato
+        {% else %}
+        Segna come pagato
+        {% endif %}
+      </button>
+    </form>
+  </form>
+</div>
+
+<!-- KPI strip -->
+<div class="kpi-grid kpi-grid-sm">
+  <article class="kpi">
+    <div>Importo</div>
+    <strong>{{ fmt_money(job.amount) }}</strong>
+  </article>
+  <article class="kpi">
+    <div>Stato pagamento</div>
+    <strong>
+      {% if job.payment_status == 'paid' %}
+      <span class="badge badge-paid">Pagato</span>
+      {% else %}
+      <span class="badge badge-pending">In attesa</span>
+      {% endif %}
+    </strong>
+  </article>
+  <article class="kpi">
+    <div>Inizio</div>
+    <strong style="font-size:1rem;">{{ fmt_date(job.start_date) }}</strong>
+  </article>
+  <article class="kpi">
+    <div>Scadenza</div>
+    <strong style="font-size:1rem;">{{ fmt_date(job.due_date) }}</strong>
+  </article>
+</div>
+
+<!-- Tabs -->
+<div class="tabs" id="job-tabs">
+  <a class="tab-btn active" data-panel="panel-dati" href="#panel-dati" onclick="switchTab(event,'panel-dati')">Dati lavoro</a>
+  <a class="tab-btn" data-panel="panel-note" href="#panel-note" onclick="switchTab(event,'panel-note')">Note diario ({{ notes_list|length }})</a>
+  <a class="tab-btn" data-panel="panel-debiti" href="#panel-debiti" onclick="switchTab(event,'panel-debiti')">Debiti</a>
+</div>
+
+<!-- Tab: Dati lavoro -->
+<div class="tab-panel card active" id="panel-dati">
+  <h2>Dati lavoro</h2>
+  <div class="detail-grid">
+    <div><span class="label">Titolo</span><span>{{ job.title }}</span></div>
+    <div><span class="label">Stato</span><span><span class="badge badge-job-{{ job.status }}">{{ statuses.get(job.status, job.status) }}</span></span></div>
+    <div><span class="label">Cliente</span>
+      <span>{% if customer %}<a href="/gestionale/clienti/{{ customer.id }}">{{ customer.company or ((customer.first_name or '') ~ ' ' ~ (customer.last_name or '')) }}</a>{% else %}—{% endif %}</span>
+    </div>
+    <div><span class="label">Importo</span><span>{{ fmt_money(job.amount) }}</span></div>
+    <div><span class="label">Inizio</span><span>{{ fmt_date(job.start_date) }}</span></div>
+    <div><span class="label">Scadenza prevista</span><span>{{ fmt_date(job.due_date) }}</span></div>
+    {% if job.services %}
+    <div class="full-width"><span class="label">Servizi</span>
+      <span>{{ job.services | map(attribute='name') | join(', ') }}</span>
+    </div>
+    {% endif %}
+    {% if job.description %}
+    <div class="full-width"><span class="label">Descrizione</span><span style="white-space:pre-wrap;">{{ job.description }}</span></div>
+    {% endif %}
+    {% if job.notes %}
+    <div class="full-width"><span class="label">Note interne</span><span style="white-space:pre-wrap;">{{ job.notes }}</span></div>
+    {% endif %}
+  </div>
+  <div style="margin-top:14px;">
+    <a href="/gestionale/lavori/{{ job.id }}/modifica" class="btn btn-sm btn-outline">Modifica dati lavoro</a>
+  </div>
+</div>
+
+<!-- Tab: Note diario -->
+<div class="tab-panel card" id="panel-note" style="display:none;">
+  <h2>Note diario</h2>
+  <form method="POST" action="/gestionale/lavori/{{ job.id }}/note" style="margin-bottom:18px;">
+    <div class="form-group">
+      <label>Aggiungi nota</label>
+      <textarea name="text" rows="3" required placeholder="Scrivi una nota cronologica..."></textarea>
+    </div>
+    <button type="submit" class="btn btn-sm">Salva nota</button>
+  </form>
+
+  {% if notes_list %}
+  <div style="display:flex;flex-direction:column;gap:12px;">
+    {% for note in notes_list %}
+    <div class="note-item">
+      <div class="note-meta">
+        <span>{{ note.created_at.strftime('%d/%m/%Y %H:%M') }}</span>
+        {% if note.updated_at and note.updated_at != note.created_at %}
+        <span class="muted">(modificato {{ note.updated_at.strftime('%d/%m/%Y %H:%M') }})</span>
+        {% endif %}
+      </div>
+      <div class="note-text">{{ note.text }}</div>
+      <details class="note-edit-form">
+        <summary class="btn-xs btn-outline" style="cursor:pointer;display:inline-block;margin-top:6px;">Modifica</summary>
+        <form method="POST" action="/gestionale/lavori/{{ job.id }}/note/{{ note.id }}/modifica" style="margin-top:8px;">
+          <textarea name="text" rows="3" required style="width:100%;margin-bottom:6px;">{{ note.text }}</textarea>
+          <button type="submit" class="btn btn-sm">Salva</button>
+        </form>
+      </details>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="muted">Nessuna nota inserita.</p>
+  {% endif %}
+</div>
+
+<!-- Tab: Debiti -->
+<div class="tab-panel card" id="panel-debiti" style="display:none;">
+  <h2>Debiti collegati</h2>
+  {% if debt %}
+  <div class="detail-grid">
+    <div><span class="label">Voce</span><span>{{ debt.label }}</span></div>
+    <div><span class="label">Scadenza</span><span>{{ fmt_date(debt.due_date) }}</span></div>
+    <div><span class="label">Totale</span><span>{{ fmt_money(debt.amount_total) }}</span></div>
+    <div><span class="label">Pagato</span><span>{{ fmt_money(debt.amount_paid) }}</span></div>
+    <div><span class="label">Residuo</span>
+      <span><strong class="{% if debt.outstanding > 0 %}kpi-red{% endif %}">{{ fmt_money(debt.outstanding) }}</strong></span>
+    </div>
+    <div><span class="label">Stato</span>
+      <span>
+        {% if debt.status == 'paid' %}
+        <span class="badge badge-paid">Pagato</span>
+        {% else %}
+        <span class="badge badge-pending">Aperto</span>
+        {% endif %}
+      </span>
+    </div>
+  </div>
+  {% if debt.outstanding > 0 %}
+  <div style="margin-top:12px;">
+    <button class="btn btn-sm" onclick="document.getElementById('pay-form-debt').style.display='block';this.style.display='none'">Registra pagamento</button>
+    <div id="pay-form-debt" class="pay-form" style="display:none;margin-top:8px;">
+      <form method="POST" action="/gestionale/debiti/{{ debt.id }}/payments/new">
+        <input type="date" name="date" required style="width:140px;" />
+        <input type="number" name="amount" step="0.01" min="0.01" max="{{ debt.outstanding }}"
+          placeholder="Importo (max {{ fmt_money(debt.outstanding) }})" required style="width:200px;" />
+        <input type="text" name="note" placeholder="Nota (opz.)" style="width:140px;" />
+        <button type="submit" class="btn btn-sm">Salva pagamento</button>
+      </form>
+    </div>
+  </div>
+  {% endif %}
+  {% else %}
+  <p class="muted">Nessun debito collegato a questo lavoro.</p>
+  {% endif %}
+</div>
+
+<script>
+function switchTab(e, panelId) {
+  e.preventDefault();
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tab-panel').forEach(p => { p.style.display = 'none'; p.classList.remove('active'); });
+  e.target.classList.add('active');
+  const panel = document.getElementById(panelId);
+  if (panel) { panel.style.display = 'block'; panel.classList.add('active'); }
+}
+// Handle hash on load
+(function() {
+  const hash = window.location.hash;
+  if (hash === '#panel-note' || hash === '#tab-note') {
+    document.querySelector('[data-panel="panel-note"]')?.click();
+  } else if (hash === '#panel-debiti') {
+    document.querySelector('[data-panel="panel-debiti"]')?.click();
+  }
+})();
+</script>
+{% endblock %}

@@ -154,10 +154,50 @@ textarea { resize: vertical }
 /* Misc */
 .muted { color: var(--muted) }
 
+/* Pipeline visuale */
+.pipeline { display: flex; gap: 0; padding: 12px 8px; overflow-x: auto; align-items: flex-start }
+.pipeline-step { display: flex; flex-direction: column; align-items: center; flex: 1; min-width: 80px; position: relative; text-align: center }
+.pipeline-step + .pipeline-step::before { content: ''; position: absolute; top: 10px; left: calc(-50% + 10px); right: calc(50% + 10px); height: 2px; background: var(--line) }
+.pipeline-step.done + .pipeline-step::before { background: var(--brand) }
+.pipeline-dot { width: 20px; height: 20px; border-radius: 50%; background: var(--line); border: 2px solid #fff; box-shadow: 0 0 0 2px var(--line); z-index: 1; position: relative }
+.pipeline-step.done .pipeline-dot { background: var(--brand); box-shadow: 0 0 0 2px var(--brand) }
+.pipeline-step.active .pipeline-dot { background: #fff; border: 2px solid var(--brand); box-shadow: 0 0 0 3px var(--brand); width: 24px; height: 24px }
+.pipeline-label { font-size: .75rem; margin-top: 6px; color: var(--muted); line-height: 1.3; max-width: 80px }
+.pipeline-step.done .pipeline-label { color: var(--brand); font-weight: 600 }
+.pipeline-step.active .pipeline-label { color: var(--brand-dark); font-weight: 700 }
+
+/* Tab buttons (alternative to tab-link anchors) */
+.tab-btn { padding: 8px 14px; font-size: .9rem; font-weight: 500; color: var(--muted); text-decoration: none; border-bottom: 2px solid transparent; margin-bottom: -2px; cursor: pointer; border-radius: 4px 4px 0 0; background: transparent; border-left: none; border-right: none; border-top: none; display: inline-block }
+.tab-btn:hover { color: var(--brand) }
+.tab-btn.active { color: var(--brand); border-bottom-color: var(--brand); background: #f0faf4 }
+.tab-panel { display: none }
+.tab-panel.active { display: block }
+
+/* Note items */
+.note-item { padding: 12px 14px; background: #f9fcfa; border: 1px solid var(--line); border-radius: 8px; border-left: 3px solid var(--brand) }
+.note-meta { font-size: .8rem; color: var(--muted); margin-bottom: 4px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap }
+.note-text { font-size: .9rem; white-space: pre-wrap; line-height: 1.5 }
+.note-edit-form { margin-top: 0 }
+.note-edit-form summary { list-style: none; outline: none }
+.note-edit-form summary::-webkit-details-marker { display: none }
+
+/* Form sections */
+.form-section { margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid var(--line) }
+.form-section:last-of-type { border-bottom: none }
+.form-section-title { font-size: .85rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin-bottom: 12px }
+
+/* Confirm delete button */
+.btn-confirm-delete { background: var(--danger); color: #fff; border: none; cursor: pointer; padding: 9px 16px; border-radius: 8px; font-weight: 600; font-size: .9rem }
+.btn-confirm-delete:hover { background: #b91c1c }
+
 @media (max-width: 900px) {
   .filters { grid-template-columns: 1fr }
   .topbar { flex-direction: column; align-items: flex-start }
   .grid-2 { grid-template-columns: 1fr }
   .page-header { flex-direction: column }
   .form-grid { grid-template-columns: 1fr }
+  .pipeline { gap: 0 }
+  .pipeline-step { min-width: 60px }
+  .pipeline-label { font-size: .7rem; max-width: 60px }
+  .header-actions { flex-wrap: wrap }
 }

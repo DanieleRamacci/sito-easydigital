@@ -1,0 +1,161 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <a href="/gestionale/lavori" class="back-link">← Lavori</a>
+    <h1>{% if job %}Modifica lavoro{% else %}Nuovo lavoro{% endif %}</h1>
+  </div>
+</div>
+
+{% if error %}
+<div class="alert alert-danger">{{ error }}</div>
+{% endif %}
+
+<form method="POST" action="{% if job %}/gestionale/lavori/{{ job.id }}/modifica{% else %}/gestionale/lavori/nuovo{% endif %}">
+  <div class="card">
+    <div class="form-section">
+      <div class="form-section-title">Informazioni lavoro</div>
+      <div class="form-grid">
+        <div class="form-group full-width">
+          <label>Titolo *</label>
+          <input type="text" name="title" required value="{{ job.title if job else '' }}" placeholder="Es: Sito web vetrina, SEO audit..." />
+        </div>
+        <div class="form-group">
+          <label>Cliente *</label>
+          <select name="customer_id" required>
+            <option value="">— Seleziona cliente —</option>
+            {% for c in customers %}
+            <option value="{{ c.id }}"
+              {% if job and job.customer_id == c.id %}selected
+              {% elif preselect_customer and preselect_customer|int == c.id %}selected
+              {% endif %}>
+              {{ c.company or ((c.first_name or '') ~ ' ' ~ (c.last_name or '')) }} — {{ c.email }}
+            </option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Stato</label>
+          <select name="status">
+            {% for key, label in statuses.items() %}
+            <option value="{{ key }}" {% if job and job.status == key %}selected{% elif not job and key == 'qualificazione_preventivo' %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Data inizio</label>
+          <input type="date" name="start_date" value="{{ job.start_date.isoformat() if job and job.start_date else '' }}" />
+        </div>
+        <div class="form-group">
+          <label>Data scadenza prevista</label>
+          <input type="date" name="due_date" value="{{ job.due_date.isoformat() if job and job.due_date else '' }}" />
+        </div>
+        <div class="form-group full-width">
+          <label>Descrizione</label>
+          <textarea name="description" rows="3" placeholder="Descrizione attività, obiettivi, note...">{{ job.description if job else '' }}</textarea>
+        </div>
+        <div class="form-group full-width">
+          <label>Note interne</label>
+          <textarea name="notes" rows="2" placeholder="Note interne (non visibili al cliente)">{{ job.notes if job else '' }}</textarea>
+        </div>
+      </div>
+    </div>
+
+    <div class="form-section">
+      <div class="form-section-title">Servizi collegati</div>
+      <div class="form-group">
+        <label>Seleziona servizi (puoi sceglierne più di uno)</label>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px;">
+          <select id="servicePicker" style="flex:1;min-width:200px;">
+            <option value="">— Aggiungi servizio —</option>
+            {% for s in services %}
+            <option value="{{ s.id }}" data-price="{{ s.price }}">{{ s.name }} ({{ fmt_money(s.price) }})</option>
+            {% endfor %}
+          </select>
+          <button type="button" class="btn btn-sm btn-outline" id="serviceAddBtn">+ Aggiungi</button>
+        </div>
+        <div id="serviceList" style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px;">
+          <!-- populated by JS -->
+        </div>
+        <div id="serviceHidden">
+          {% if job %}
+            {% for s in job.services %}
+            <input type="hidden" name="service_ids" value="{{ s.id }}" />
+            {% endfor %}
+          {% endif %}
+        </div>
+      </div>
+      <div class="form-group" style="max-width:200px;">
+        <label>Importo totale (€)</label>
+        <input type="number" name="amount" id="amountInput" step="0.01" min="0"
+          value="{{ job.amount if job else '0' }}" placeholder="0.00" />
+        <small class="muted">Calcolato automaticamente dai servizi, oppure inserisci manualmente.</small>
+      </div>
+    </div>
+
+    <div style="display:flex; gap:10px; margin-top:8px;">
+      <button type="submit" class="btn">{% if job %}Salva modifiche{% else %}Crea lavoro{% endif %}</button>
+      <a href="{% if job %}/gestionale/lavori/{{ job.id }}{% else %}/gestionale/lavori{% endif %}" class="btn btn-outline">Annulla</a>
+    </div>
+  </div>
+</form>
+
+<script>
+(function () {
+  const servicesData = {{ services | tojson }};
+  const picker = document.getElementById('servicePicker');
+  const addBtn = document.getElementById('serviceAddBtn');
+  const listEl = document.getElementById('serviceList');
+  const hiddenEl = document.getElementById('serviceHidden');
+  const amountInput = document.getElementById('amountInput');
+
+  // Collect pre-selected IDs from hidden inputs
+  let selected = Array.from(hiddenEl.querySelectorAll('input[type=hidden]')).map(i => Number(i.value));
+
+  function renderList() {
+    listEl.innerHTML = selected.length
+      ? selected.map(id => {
+          const s = servicesData.find(x => x.id === id);
+          const label = s ? (s.name + ' (' + formatMoney(s.price) + ')') : ('Servizio #' + id);
+          return '<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:#f9fcfa;border:1px solid #dce6df;border-radius:8px;">'
+            + '<span style="flex:1">' + esc(label) + '</span>'
+            + '<button type="button" class="btn-xs btn-danger" data-id="' + id + '">Rimuovi</button>'
+            + '</div>';
+        }).join('')
+      : '<p class="muted" style="font-size:.85rem;">Nessun servizio selezionato.</p>';
+
+    hiddenEl.innerHTML = selected.map(id => '<input type="hidden" name="service_ids" value="' + id + '" />').join('');
+
+    const total = selected.reduce((sum, id) => {
+      const s = servicesData.find(x => x.id === id);
+      return sum + (s ? Number(s.price || 0) : 0);
+    }, 0);
+    if (total > 0) amountInput.value = total.toFixed(2);
+
+    listEl.querySelectorAll('button[data-id]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = Number(btn.getAttribute('data-id'));
+        selected = selected.filter(x => x !== id);
+        renderList();
+      });
+    });
+  }
+
+  addBtn.addEventListener('click', () => {
+    const val = Number(picker.value || 0);
+    if (!val) return;
+    if (!selected.includes(val)) selected.push(val);
+    renderList();
+  });
+
+  function esc(v) {
+    return String(v || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+  function formatMoney(v) {
+    return '€ ' + Number(v || 0).toFixed(2).replace('.', ',');
+  }
+
+  renderList();
+})();
+</script>
+{% endblock %}

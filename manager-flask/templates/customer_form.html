@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <a href="/gestionale/clienti" class="back-link">← Clienti</a>
+    <h1>{% if customer %}Modifica cliente{% else %}Nuovo cliente{% endif %}</h1>
+  </div>
+</div>
+
+{% if error %}
+<div class="alert alert-danger">{{ error }}</div>
+{% endif %}
+
+<form method="POST" action="{% if customer %}/gestionale/clienti/{{ customer.id }}/modifica{% else %}/gestionale/clienti/nuovo{% endif %}">
+  <div class="card">
+    <div class="form-section">
+      <div class="form-section-title">Anagrafica aziendale</div>
+      <div class="form-grid">
+        <div class="form-group">
+          <label>Azienda *</label>
+          <input type="text" name="company" required value="{{ customer.company if customer else '' }}" placeholder="Ragione sociale" />
+        </div>
+        <div class="form-group">
+          <label>Sito web</label>
+          <input type="url" name="website" value="{{ customer.website if customer else '' }}" placeholder="https://esempio.it" />
+        </div>
+        <div class="form-group">
+          <label>P.IVA / Codice fiscale</label>
+          <input type="text" name="vat" value="{{ customer.vat if customer else '' }}" placeholder="IT01234567890" />
+        </div>
+        <div class="form-group">
+          <label>PEC</label>
+          <input type="email" name="pec" value="{{ customer.pec if customer else '' }}" placeholder="pec@esempio.it" />
+        </div>
+        <div class="form-group">
+          <label>Codice SDI</label>
+          <input type="text" name="sdi" value="{{ customer.sdi if customer else '' }}" placeholder="XXXXXXX" />
+        </div>
+        <div class="form-group full-width">
+          <label>Indirizzo di fatturazione</label>
+          <input type="text" name="billing_address" value="{{ customer.billing_address if customer else '' }}" placeholder="Via Roma 1, 20100 Milano" />
+        </div>
+      </div>
+    </div>
+
+    <div class="form-section">
+      <div class="form-section-title">Referente</div>
+      <div class="form-grid">
+        <div class="form-group">
+          <label>Nome</label>
+          <input type="text" name="first_name" value="{{ customer.first_name if customer else '' }}" placeholder="Mario" />
+        </div>
+        <div class="form-group">
+          <label>Cognome</label>
+          <input type="text" name="last_name" value="{{ customer.last_name if customer else '' }}" placeholder="Rossi" />
+        </div>
+        <div class="form-group">
+          <label>Email *</label>
+          <input type="email" name="email" required value="{{ customer.email if customer else '' }}" placeholder="mario@esempio.it" />
+        </div>
+        <div class="form-group">
+          <label>Telefono</label>
+          <input type="text" name="phone" value="{{ customer.phone if customer else '' }}" placeholder="+39 02 1234567" />
+        </div>
+      </div>
+    </div>
+
+    <div class="form-section">
+      <div class="form-section-title">Stato cliente</div>
+      <div class="form-group" style="max-width:260px">
+        <label>Stato</label>
+        <select name="status">
+          <option value="lead" {% if not customer or customer.status == 'lead' %}selected{% endif %}>Lead</option>
+          <option value="invited" {% if customer and customer.status == 'invited' %}selected{% endif %}>Invitato</option>
+          <option value="active" {% if customer and customer.status == 'active' %}selected{% endif %}>Attivo</option>
+        </select>
+      </div>
+    </div>
+
+    <div style="display:flex; gap:10px; margin-top:8px;">
+      <button type="submit" class="btn">{% if customer %}Salva modifiche{% else %}Crea cliente{% endif %}</button>
+      <a href="{% if customer %}/gestionale/clienti/{{ customer.id }}{% else %}/gestionale/clienti{% endif %}" class="btn btn-outline">Annulla</a>
+    </div>
+  </div>
+</form>
+{% endblock %}

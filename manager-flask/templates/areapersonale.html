@@ -145,6 +145,24 @@
       </div>
       {% endif %}
 
+      <!-- Ticket form -->
+      <div class="ap-section">
+        <h2>Apri un ticket di supporto</h2>
+        <form method="POST" action="/areapersonale/ticket/nuovo" style="background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:16px;">
+          <div style="margin-bottom:10px;">
+            <label style="display:block;font-size:.85rem;font-weight:600;margin-bottom:4px;">Oggetto *</label>
+            <input type="text" name="subject" required placeholder="Descrivi brevemente il problema o la richiesta"
+              style="width:100%;padding:9px 11px;border:1px solid #e5e7eb;border-radius:8px;font-size:.93rem;" />
+          </div>
+          <div style="margin-bottom:12px;">
+            <label style="display:block;font-size:.85rem;font-weight:600;margin-bottom:4px;">Messaggio *</label>
+            <textarea name="message" rows="4" required placeholder="Descrivi nel dettaglio la tua richiesta..."
+              style="width:100%;padding:9px 11px;border:1px solid #e5e7eb;border-radius:8px;font-size:.93rem;resize:vertical;"></textarea>
+          </div>
+          <button type="submit" class="btn" style="font-size:.9rem;">Invia ticket</button>
+        </form>
+      </div>
+
       {% else %}
       <div style="text-align:center;padding:60px 0;color:#6b7280;">
         <p>Profilo non trovato. Contatta il supporto.</p>

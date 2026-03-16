@@ -1,15 +1,16 @@
 {% if rows %}
 <table class="tbl">
-  <thead><tr><th>Cliente</th><th>Titolo</th><th>Servizi</th><th>Stato</th><th>Scadenza</th><th>Importo</th></tr></thead>
+  <thead><tr><th>Cliente</th><th>Titolo</th><th>Servizi</th><th>Stato</th><th>Scadenza</th><th>Importo</th><th></th></tr></thead>
   <tbody>
     {% for j in rows %}
       <tr>
         <td><a href="/gestionale/clienti/{{ j.customer_id }}">{{ j.customer_name or '-' }}</a></td>
-        <td>{{ j.title or '-' }}</td>
+        <td><a href="/gestionale/lavori/{{ j.id }}" style="font-weight:500;">{{ j.title or '-' }}</a></td>
         <td>{{ j.services_label or '-' }}</td>
         <td><span class="badge badge-job-{{ j.status }}">{{ j.status_label or j.status or '-' }}</span></td>
         <td>{{ fmt_date(j.dueDate or '') }}</td>
         <td>{{ fmt_money(j.amount) }}</td>
+        <td><a href="/gestionale/lavori/{{ j.id }}" class="btn-xs btn-outline">Dettaglio</a></td>
       </tr>
     {% endfor %}
   </tbody>

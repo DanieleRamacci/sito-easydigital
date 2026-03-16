@@ -10,15 +10,18 @@ from ..models import (
     BillingInterval,
     BillingType,
     Customer,
+    CustomerNote,
     DebtItem,
     Invite,
     Job,
+    JobNote,
     JobService,
     JobStatus,
     Notification,
     PaymentEntry,
     PaymentStatus,
     Service,
+    ServicePriceHistory,
     Subscription,
     Ticket,
 )
@@ -864,3 +867,295 @@ def customer_area_data(wp_user_id: int, user_email: str) -> Optional[dict[str, A
         "total_outstanding": total_outstanding,
         "upcoming_renewals": upcoming_renewals,
     }
+
+
+# ---------------------------------------------------------------------------
+# Customer CRUD
+# ---------------------------------------------------------------------------
+
+def create_customer(form_data: dict) -> Customer:
+    customer = Customer(
+        company=(form_data.get("company") or "").strip(),
+        first_name=(form_data.get("first_name") or "").strip(),
+        last_name=(form_data.get("last_name") or "").strip(),
+        email=(form_data.get("email") or "").strip().lower(),
+        phone=(form_data.get("phone") or "").strip(),
+        website=(form_data.get("website") or "").strip(),
+        vat=(form_data.get("vat") or "").strip(),
+        billing_address=(form_data.get("billing_address") or "").strip(),
+        pec=(form_data.get("pec") or "").strip(),
+        sdi=(form_data.get("sdi") or "").strip(),
+        status=(form_data.get("status") or "lead").strip(),
+    )
+    db.session.add(customer)
+    db.session.commit()
+    return customer
+
+
+def update_customer(customer_id: int, form_data: dict) -> Optional[Customer]:
+    customer = db.session.get(Customer, customer_id)
+    if not customer:
+        return None
+    customer.company = (form_data.get("company") or customer.company).strip()
+    customer.first_name = (form_data.get("first_name") or "").strip()
+    customer.last_name = (form_data.get("last_name") or "").strip()
+    customer.email = (form_data.get("email") or customer.email).strip().lower()
+    customer.phone = (form_data.get("phone") or "").strip()
+    customer.website = (form_data.get("website") or "").strip()
+    customer.vat = (form_data.get("vat") or "").strip()
+    customer.billing_address = (form_data.get("billing_address") or "").strip()
+    customer.pec = (form_data.get("pec") or "").strip()
+    customer.sdi = (form_data.get("sdi") or "").strip()
+    customer.status = (form_data.get("status") or customer.status).strip()
+    db.session.commit()
+    return customer
+
+
+def delete_customer(customer_id: int) -> bool:
+    customer = db.session.get(Customer, customer_id)
+    if not customer:
+        return False
+    db.session.delete(customer)
+    db.session.commit()
+    return True
+
+
+def add_customer_note(customer_id: int, text: str) -> Optional[CustomerNote]:
+    customer = db.session.get(Customer, customer_id)
+    if not customer or not text.strip():
+        return None
+    note = CustomerNote(customer_id=customer_id, text=text.strip())
+    db.session.add(note)
+    db.session.commit()
+    return note
+
+
+# ---------------------------------------------------------------------------
+# Job CRUD
+# ---------------------------------------------------------------------------
+
+def job_detail_data(job_id: int) -> Optional[dict]:
+    job = db.session.get(Job, job_id)
+    if not job:
+        return None
+
+    customer = db.session.get(Customer, job.customer_id)
+
+    notes_list = (
+        JobNote.query
+        .filter_by(job_id=job_id)
+        .order_by(JobNote.created_at.desc())
+        .all()
+    )
+
+    debt = DebtItem.query.filter_by(source_type="job", source_id=job_id).first()
+    debt_data = None
+    if debt:
+        outstanding = debt_outstanding(debt.amount_total, debt.amount_paid)
+        debt_data = {
+            "id": debt.id,
+            "label": debt.label,
+            "due_date": debt.due_date,
+            "amount_total": parse_decimal(debt.amount_total),
+            "amount_paid": parse_decimal(debt.amount_paid),
+            "outstanding": outstanding,
+            "status": debt.status,
+        }
+
+    return {
+        "job": job,
+        "customer": customer,
+        "notes_list": notes_list,
+        "debt": debt_data,
+    }
+
+
+def create_job(form_data: dict) -> Job:
+    customer_id = int(form_data.get("customer_id") or 0)
+    service_ids_raw = form_data.getlist("service_ids") if hasattr(form_data, "getlist") else form_data.get("service_ids", [])
+    if isinstance(service_ids_raw, str):
+        service_ids_raw = [service_ids_raw]
+    service_ids = [int(s) for s in service_ids_raw if s]
+
+    # Compute amount from services if not manually set
+    amount_raw = form_data.get("amount") or 0
+    if service_ids and not float(amount_raw or 0):
+        services = Service.query.filter(Service.id.in_(service_ids)).all()
+        amount = sum(parse_decimal(s.price) for s in services)
+    else:
+        amount = parse_decimal(amount_raw)
+
+    job = Job(
+        customer_id=customer_id,
+        title=(form_data.get("title") or "").strip(),
+        description=(form_data.get("description") or "").strip(),
+        notes=(form_data.get("notes") or "").strip(),
+        start_date=parse_date(form_data.get("start_date")),
+        due_date=parse_date(form_data.get("due_date")),
+        amount=amount,
+        status=(form_data.get("status") or JobStatus.QUALIFICAZIONE_PREVENTIVO.value),
+        payment_status="pending",
+    )
+    db.session.add(job)
+    db.session.flush()
+
+    for sid in service_ids:
+        js = JobService(job_id=job.id, service_id=sid)
+        db.session.add(js)
+
+    upsert_debt_from_job(job)
+    db.session.commit()
+    return job
+
+
+def update_job(job_id: int, form_data: dict) -> Optional[Job]:
+    job = db.session.get(Job, job_id)
+    if not job:
+        return None
+
+    service_ids_raw = form_data.getlist("service_ids") if hasattr(form_data, "getlist") else form_data.get("service_ids", [])
+    if isinstance(service_ids_raw, str):
+        service_ids_raw = [service_ids_raw]
+    service_ids = [int(s) for s in service_ids_raw if s]
+
+    job.title = (form_data.get("title") or job.title).strip()
+    job.customer_id = int(form_data.get("customer_id") or job.customer_id)
+    job.description = (form_data.get("description") or "").strip()
+    job.notes = (form_data.get("notes") or "").strip()
+    job.start_date = parse_date(form_data.get("start_date")) or job.start_date
+    job.due_date = parse_date(form_data.get("due_date")) or job.due_date
+    job.status = (form_data.get("status") or job.status)
+
+    if service_ids:
+        amount_raw = form_data.get("amount") or 0
+        if not float(amount_raw or 0):
+            services = Service.query.filter(Service.id.in_(service_ids)).all()
+            job.amount = sum(parse_decimal(s.price) for s in services)
+        else:
+            job.amount = parse_decimal(amount_raw)
+
+        # Replace service associations
+        JobService.query.filter_by(job_id=job_id).delete()
+        for sid in service_ids:
+            js = JobService(job_id=job_id, service_id=sid)
+            db.session.add(js)
+    else:
+        amount_raw = form_data.get("amount")
+        if amount_raw is not None:
+            job.amount = parse_decimal(amount_raw)
+
+    upsert_debt_from_job(job)
+    db.session.commit()
+    return job
+
+
+def delete_job(job_id: int) -> bool:
+    job = db.session.get(Job, job_id)
+    if not job:
+        return False
+    db.session.delete(job)
+    db.session.commit()
+    return True
+
+
+def add_job_note(job_id: int, text: str) -> Optional[JobNote]:
+    job = db.session.get(Job, job_id)
+    if not job or not text.strip():
+        return None
+    note = JobNote(job_id=job_id, text=text.strip())
+    db.session.add(note)
+    db.session.commit()
+    return note
+
+
+def update_job_note(note_id: int, text: str) -> Optional[JobNote]:
+    note = db.session.get(JobNote, note_id)
+    if not note or not text.strip():
+        return None
+    note.text = text.strip()
+    db.session.commit()
+    return note
+
+
+def toggle_job_payment(job_id: int) -> Optional[Job]:
+    job = db.session.get(Job, job_id)
+    if not job:
+        return None
+    if job.payment_status == "paid":
+        job.payment_status = "pending"
+    else:
+        job.payment_status = "paid"
+    db.session.commit()
+    return job
+
+
+# ---------------------------------------------------------------------------
+# Services catalog
+# ---------------------------------------------------------------------------
+
+def services_query() -> list[dict]:
+    services = Service.query.order_by(Service.name.asc()).all()
+    result = []
+    for svc in services:
+        history = (
+            ServicePriceHistory.query
+            .filter_by(service_id=svc.id)
+            .order_by(ServicePriceHistory.changed_at.desc())
+            .all()
+        )
+        result.append({
+            "service": svc,
+            "price_history": history,
+        })
+    return result
+
+
+def create_service(form_data: dict) -> Service:
+    svc = Service(
+        name=(form_data.get("name") or "").strip(),
+        description=(form_data.get("description") or "").strip(),
+        price=parse_decimal(form_data.get("price") or 0),
+        billing_type=(form_data.get("billing_type") or BillingType.ONE_TIME.value),
+        billing_interval=(form_data.get("billing_interval") or BillingInterval.ANNUAL.value),
+        active=True,
+    )
+    db.session.add(svc)
+    db.session.commit()
+    return svc
+
+
+def update_service_price(service_id: int, new_price: Any, note: str = "") -> Optional[Service]:
+    svc = db.session.get(Service, service_id)
+    if not svc:
+        return None
+    new_price_dec = parse_decimal(new_price)
+    if new_price_dec < Decimal("0"):
+        return None
+    old_price = parse_decimal(svc.price)
+    if old_price != new_price_dec:
+        history_entry = ServicePriceHistory(
+            service_id=service_id,
+            old_price=old_price,
+            new_price=new_price_dec,
+            note=note.strip() if note else None,
+        )
+        db.session.add(history_entry)
+    svc.price = new_price_dec
+    db.session.commit()
+    return svc
+
+
+# ---------------------------------------------------------------------------
+# Ticket creation (customer area)
+# ---------------------------------------------------------------------------
+
+def create_ticket(customer_id: Optional[int], subject: str, message: str) -> Ticket:
+    ticket = Ticket(
+        customer_id=customer_id,
+        subject=subject.strip(),
+        message=message.strip(),
+        status="open",
+    )
+    db.session.add(ticket)
+    db.session.commit()
+    return ticket

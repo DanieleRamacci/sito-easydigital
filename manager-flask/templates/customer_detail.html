@@ -7,11 +7,17 @@
     <span class="badge badge-status-{{ customer.status }}">{{ customer.status }}</span>
   </div>
   <div class="header-actions">
-    <a href="/gestionale/abbonamenti/nuovo?customer_id={{ customer.id }}" class="btn btn-sm">+ Abbonamento</a>
+    <a href="/gestionale/lavori/nuovo?customer_id={{ customer.id }}" class="btn btn-sm">+ Nuovo lavoro</a>
+    <a href="/gestionale/abbonamenti/nuovo?customer_id={{ customer.id }}" class="btn btn-sm btn-outline">+ Abbonamento</a>
     <button class="btn btn-sm btn-outline"
       hx-post="/gestionale/clienti/{{ customer.id }}/invita"
       hx-target="#invite-area"
       hx-swap="innerHTML">Genera link registrazione</button>
+    <form method="POST" action="/gestionale/clienti/{{ customer.id }}/elimina"
+      onsubmit="return confirm('Eliminare questo cliente e tutti i dati collegati (lavori, abbonamenti, debiti, inviti, note)?');"
+      style="display:inline;">
+      <button type="submit" class="btn btn-sm btn-danger">Elimina cliente</button>
+    </form>
   </div>
 </div>
 <div id="invite-area"></div>
@@ -43,6 +49,8 @@
   <a class="tab-link" href="#sec-abbonamenti" onclick="showTab(event,'sec-abbonamenti')">Abbonamenti</a>
   <a class="tab-link" href="#sec-debiti" onclick="showTab(event,'sec-debiti')">Debiti aperti</a>
   <a class="tab-link" href="#sec-versamenti" onclick="showTab(event,'sec-versamenti')">Storico versamenti</a>
+  <a class="tab-link" href="#sec-note" onclick="showTab(event,'sec-note')">Note ({{ customer.notes.count() }})</a>
+  <a class="tab-link" href="#sec-modifica" onclick="showTab(event,'sec-modifica')">Modifica anagrafica</a>
 </div>
 
 <!-- Anagrafica -->
@@ -79,17 +87,21 @@
 
 <!-- Lavori -->
 <section id="sec-lavori" class="card tab-section">
-  <h2>Lavori attivi / in pipeline</h2>
+  <div class="section-header">
+    <h2>Lavori attivi / in pipeline</h2>
+    <a href="/gestionale/lavori/nuovo?customer_id={{ customer.id }}" class="btn btn-sm">+ Nuovo lavoro</a>
+  </div>
   {% if active_jobs %}
   <table class="tbl">
-    <thead><tr><th>Titolo</th><th>Stato</th><th>Scadenza</th><th>Importo</th></tr></thead>
+    <thead><tr><th>Titolo</th><th>Stato</th><th>Scadenza</th><th>Importo</th><th></th></tr></thead>
     <tbody>
       {% for j in active_jobs %}
       <tr>
-        <td>{{ j.title }}</td>
+        <td><a href="/gestionale/lavori/{{ j.id }}">{{ j.title }}</a></td>
         <td><span class="badge badge-job-{{ j.status }}">{{ JOB_STATUS_LABELS.get(j.status, j.status) }}</span></td>
         <td>{{ fmt_date(j.due_date) }}</td>
         <td>{{ fmt_money(j.amount) }}</td>
+        <td><a href="/gestionale/lavori/{{ j.id }}" class="btn-xs btn-outline">Dettaglio</a></td>
       </tr>
       {% endfor %}
     </tbody>
@@ -101,10 +113,14 @@
   {% if closed_won_jobs %}
   <h3 style="margin-top:18px;">Chiusi — acquisiti</h3>
   <table class="tbl">
-    <thead><tr><th>Titolo</th><th>Importo</th></tr></thead>
+    <thead><tr><th>Titolo</th><th>Importo</th><th></th></tr></thead>
     <tbody>
       {% for j in closed_won_jobs %}
-      <tr><td>{{ j.title }}</td><td>{{ fmt_money(j.amount) }}</td></tr>
+      <tr>
+        <td><a href="/gestionale/lavori/{{ j.id }}">{{ j.title }}</a></td>
+        <td>{{ fmt_money(j.amount) }}</td>
+        <td><a href="/gestionale/lavori/{{ j.id }}" class="btn-xs btn-outline">Dettaglio</a></td>
+      </tr>
       {% endfor %}
     </tbody>
   </table>
@@ -113,10 +129,14 @@
   {% if closed_lost_jobs %}
   <h3 style="margin-top:18px;" class="muted">Chiusi — persi</h3>
   <table class="tbl tbl-muted">
-    <thead><tr><th>Titolo</th><th>Importo stimato</th></tr></thead>
+    <thead><tr><th>Titolo</th><th>Importo stimato</th><th></th></tr></thead>
     <tbody>
       {% for j in closed_lost_jobs %}
-      <tr><td>{{ j.title }}</td><td>{{ fmt_money(j.amount) }}</td></tr>
+      <tr>
+        <td><a href="/gestionale/lavori/{{ j.id }}">{{ j.title }}</a></td>
+        <td>{{ fmt_money(j.amount) }}</td>
+        <td><a href="/gestionale/lavori/{{ j.id }}" class="btn-xs btn-outline">Dettaglio</a></td>
+      </tr>
       {% endfor %}
     </tbody>
   </table>
@@ -219,6 +239,90 @@
   {% endif %}
 </section>
 
+<!-- Note cliente -->
+<section id="sec-note" class="card tab-section">
+  <h2>Note cliente</h2>
+  <form method="POST" action="/gestionale/clienti/{{ customer.id }}/note" style="margin-bottom:18px;">
+    <div class="form-group">
+      <label>Aggiungi nota</label>
+      <textarea name="text" rows="3" required placeholder="Scrivi una nota sul cliente..."></textarea>
+    </div>
+    <button type="submit" class="btn btn-sm">Salva nota</button>
+  </form>
+
+  {% set note_list = customer.notes.order_by('created_at desc').all() %}
+  {% if note_list %}
+  <div style="display:flex;flex-direction:column;gap:10px;">
+    {% for note in note_list %}
+    <div class="note-item">
+      <div class="note-meta">{{ note.created_at.strftime('%d/%m/%Y %H:%M') }}</div>
+      <div class="note-text">{{ note.text }}</div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="muted">Nessuna nota inserita.</p>
+  {% endif %}
+</section>
+
+<!-- Modifica anagrafica -->
+<section id="sec-modifica" class="card tab-section">
+  <h2>Modifica anagrafica</h2>
+  <form method="POST" action="/gestionale/clienti/{{ customer.id }}/modifica">
+    <div class="form-grid">
+      <div class="form-group">
+        <label>Azienda *</label>
+        <input type="text" name="company" required value="{{ customer.company or '' }}" />
+      </div>
+      <div class="form-group">
+        <label>Sito web</label>
+        <input type="url" name="website" value="{{ customer.website or '' }}" />
+      </div>
+      <div class="form-group">
+        <label>P.IVA / CF</label>
+        <input type="text" name="vat" value="{{ customer.vat or '' }}" />
+      </div>
+      <div class="form-group">
+        <label>Nome referente</label>
+        <input type="text" name="first_name" value="{{ customer.first_name or '' }}" />
+      </div>
+      <div class="form-group">
+        <label>Cognome referente</label>
+        <input type="text" name="last_name" value="{{ customer.last_name or '' }}" />
+      </div>
+      <div class="form-group">
+        <label>Email *</label>
+        <input type="email" name="email" required value="{{ customer.email or '' }}" />
+      </div>
+      <div class="form-group">
+        <label>Telefono</label>
+        <input type="text" name="phone" value="{{ customer.phone or '' }}" />
+      </div>
+      <div class="form-group">
+        <label>PEC</label>
+        <input type="email" name="pec" value="{{ customer.pec or '' }}" />
+      </div>
+      <div class="form-group">
+        <label>Codice SDI</label>
+        <input type="text" name="sdi" value="{{ customer.sdi or '' }}" />
+      </div>
+      <div class="form-group full-width">
+        <label>Indirizzo fatturazione</label>
+        <input type="text" name="billing_address" value="{{ customer.billing_address or '' }}" />
+      </div>
+      <div class="form-group">
+        <label>Stato</label>
+        <select name="status">
+          <option value="lead" {% if customer.status == 'lead' %}selected{% endif %}>Lead</option>
+          <option value="invited" {% if customer.status == 'invited' %}selected{% endif %}>Invitato</option>
+          <option value="active" {% if customer.status == 'active' %}selected{% endif %}>Attivo</option>
+        </select>
+      </div>
+    </div>
+    <button type="submit" class="btn btn-sm" style="margin-top:8px;">Salva modifiche</button>
+  </form>
+</section>
+
 <script>
 function showTab(e, id) {
   e.preventDefault();
@@ -231,5 +335,13 @@ function togglePayForm(id) {
   const el = document.getElementById('pay-form-' + id);
   el.style.display = el.style.display === 'none' ? 'block' : 'none';
 }
+// Handle hash navigation (e.g. after adding a note)
+(function() {
+  const hash = window.location.hash;
+  if (hash === '#sec-note') {
+    const link = document.querySelector('[href="#sec-note"]');
+    if (link) link.click();
+  }
+})();
 </script>
 {% endblock %}

@@ -60,6 +60,8 @@ class Service(TimestampMixin, db.Model):
     )
     active = db.Column(db.Boolean, default=True, nullable=False)
 
+    price_history = db.relationship("ServicePriceHistory", backref="service", lazy="dynamic", cascade="all, delete-orphan")
+
 
 class Customer(TimestampMixin, db.Model):
     __tablename__ = "customers"
@@ -82,6 +84,7 @@ class Customer(TimestampMixin, db.Model):
     subscriptions = db.relationship("Subscription", backref="customer", lazy="dynamic", cascade="all, delete-orphan")
     debt_items = db.relationship("DebtItem", backref="customer", lazy="dynamic", cascade="all, delete-orphan")
     invites = db.relationship("Invite", backref="customer", lazy="dynamic", cascade="all, delete-orphan")
+    notes = db.relationship("CustomerNote", backref="customer", lazy="dynamic", cascade="all, delete-orphan")
 
     __table_args__ = (db.Index("ux_customers_email", db.func.lower(email), unique=True),)
 
@@ -109,6 +112,7 @@ class Job(TimestampMixin, db.Model):
     due_date = db.Column(db.Date)
     start_date = db.Column(db.Date)
     amount = db.Column(db.Numeric(12, 2), default=0, nullable=False)
+    payment_status = db.Column(db.String(32), default="pending", nullable=False)
     status = db.Column(
         db.Enum(JobStatus, values_callable=lambda x: [e.value for e in x], native_enum=False),
         default=JobStatus.QUALIFICAZIONE_PREVENTIVO.value,
@@ -116,6 +120,7 @@ class Job(TimestampMixin, db.Model):
     )
 
     services = db.relationship("Service", secondary="job_services", lazy="joined")
+    job_notes = db.relationship("JobNote", backref="job", lazy="dynamic", cascade="all, delete-orphan")
 
 
 class Subscription(TimestampMixin, db.Model):
@@ -221,6 +226,25 @@ class CustomerContact(TimestampMixin, db.Model):
     customer_id = db.Column(db.BigInteger, db.ForeignKey("customers.id", ondelete="CASCADE"), nullable=False)
     name = db.Column(db.Text, nullable=False)
     email = db.Column(db.Text)
+
+
+class CustomerNote(db.Model):
+    __tablename__ = "customer_notes"
+
+    id = db.Column(db.BigInteger, primary_key=True)
+    customer_id = db.Column(db.BigInteger, db.ForeignKey("customers.id", ondelete="CASCADE"), nullable=False, index=True)
+    text = db.Column(db.Text, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+
+class JobNote(db.Model):
+    __tablename__ = "job_notes"
+
+    id = db.Column(db.BigInteger, primary_key=True)
+    job_id = db.Column(db.BigInteger, db.ForeignKey("jobs.id", ondelete="CASCADE"), nullable=False, index=True)
+    text = db.Column(db.Text, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
 
 class ServicePriceHistory(db.Model):

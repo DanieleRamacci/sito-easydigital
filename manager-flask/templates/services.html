@@ -1,0 +1,139 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Catalogo servizi</h1>
+    <p class="muted" style="margin:0;font-size:.9rem;">Gestisci il listino prezzi e lo storico variazioni.</p>
+  </div>
+</div>
+
+<!-- Form nuovo servizio -->
+<div class="card">
+  <h2>Nuovo servizio</h2>
+  <form method="POST" action="/gestionale/servizi/nuovo">
+    <div class="form-grid">
+      <div class="form-group">
+        <label>Nome *</label>
+        <input type="text" name="name" required placeholder="Es: Sito web vetrina" />
+      </div>
+      <div class="form-group">
+        <label>Prezzo (€)</label>
+        <input type="number" name="price" step="0.01" min="0" placeholder="0.00" value="0" />
+      </div>
+      <div class="form-group">
+        <label>Tipo fatturazione</label>
+        <select name="billing_type">
+          <option value="one_time">Una tantum</option>
+          <option value="subscription">Abbonamento</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Intervallo rinnovo</label>
+        <select name="billing_interval">
+          <option value="annual">Annuale</option>
+          <option value="semiannual">Semestrale</option>
+          <option value="monthly">Mensile</option>
+        </select>
+      </div>
+      <div class="form-group full-width">
+        <label>Descrizione</label>
+        <textarea name="description" rows="2" placeholder="Descrizione del servizio (opzionale)"></textarea>
+      </div>
+    </div>
+    <button type="submit" class="btn btn-sm">Crea servizio</button>
+  </form>
+</div>
+
+<!-- Catalogo -->
+<div class="card">
+  <h2>Servizi disponibili</h2>
+  {% if rows %}
+  <table class="tbl">
+    <thead>
+      <tr>
+        <th>Nome</th>
+        <th>Tipo</th>
+        <th>Intervallo</th>
+        <th>Prezzo attuale</th>
+        <th>Stato</th>
+        <th>Aggiorna prezzo</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      {% set svc = row.service %}
+      <tr>
+        <td>
+          <strong>{{ svc.name }}</strong>
+          {% if svc.description %}
+          <div class="muted" style="font-size:.82rem;">{{ svc.description }}</div>
+          {% endif %}
+        </td>
+        <td>
+          {% if svc.billing_type == 'subscription' %}
+          <span class="badge badge-info">Abbonamento</span>
+          {% else %}
+          <span class="badge badge-success">Una tantum</span>
+          {% endif %}
+        </td>
+        <td>{{ BILLING_INTERVAL_LABELS.get(svc.billing_interval, svc.billing_interval) if svc.billing_type == 'subscription' else '—' }}</td>
+        <td><strong>{{ fmt_money(svc.price) }}</strong></td>
+        <td>
+          {% if svc.active %}
+          <span class="badge badge-active">Attivo</span>
+          {% else %}
+          <span class="badge badge-cancelled">Inattivo</span>
+          {% endif %}
+        </td>
+        <td>
+          <button class="btn-xs btn-outline" onclick="togglePriceForm('pf-{{ svc.id }}', this)">Modifica prezzo</button>
+          <div id="pf-{{ svc.id }}" style="display:none;margin-top:8px;">
+            <form method="POST" action="/gestionale/servizi/{{ svc.id }}/prezzo" style="display:flex;gap:6px;flex-wrap:wrap;align-items:flex-end;">
+              <div>
+                <label style="font-size:.8rem;font-weight:600;">Nuovo prezzo (€)</label>
+                <input type="number" name="price" step="0.01" min="0" value="{{ svc.price }}" required style="width:120px;" />
+              </div>
+              <div>
+                <label style="font-size:.8rem;font-weight:600;">Nota variazione</label>
+                <input type="text" name="note" placeholder="Motivo variazione" style="width:180px;" />
+              </div>
+              <button type="submit" class="btn btn-sm">Salva</button>
+            </form>
+          </div>
+          {% if row.price_history %}
+          <details style="margin-top:6px;">
+            <summary style="font-size:.8rem;color:var(--muted);cursor:pointer;">Storico prezzi ({{ row.price_history|length }})</summary>
+            <table class="tbl" style="margin-top:6px;font-size:.82rem;">
+              <thead><tr><th>Data</th><th>Da</th><th>A</th><th>Nota</th></tr></thead>
+              <tbody>
+                {% for h in row.price_history %}
+                <tr>
+                  <td>{{ h.changed_at.strftime('%d/%m/%Y') }}</td>
+                  <td>{{ fmt_money(h.old_price) }}</td>
+                  <td>{{ fmt_money(h.new_price) }}</td>
+                  <td>{{ h.note or '—' }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </details>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">Nessun servizio nel catalogo. Creane uno con il form sopra.</p>
+  {% endif %}
+</div>
+
+<script>
+function togglePriceForm(id, btn) {
+  const el = document.getElementById(id);
+  const visible = el.style.display !== 'none';
+  el.style.display = visible ? 'none' : 'block';
+  btn.textContent = visible ? 'Modifica prezzo' : 'Chiudi';
+}
+</script>
+{% endblock %}
