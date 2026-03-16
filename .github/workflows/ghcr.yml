@@ -79,3 +79,21 @@ jobs:
           push: true
           tags: ${{ steps.meta_backend_v2.outputs.tags }}
           labels: ${{ steps.meta_backend_v2.outputs.labels }}
+
+      - name: Docker metadata (Manager Flask)
+        id: meta_mgr_flask
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ github.event.repository.name }}-manager-flask
+          tags: |
+            type=raw,value=latest
+            type=sha
+
+      - name: Build and push (Manager Flask)
+        uses: docker/build-push-action@v6
+        with:
+          context: ./manager-flask
+          file: manager-flask/Dockerfile
+          push: true
+          tags: ${{ steps.meta_mgr_flask.outputs.tags }}
+          labels: ${{ steps.meta_mgr_flask.outputs.labels }}

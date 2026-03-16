@@ -68,30 +68,33 @@ services:
       - wp_internal
       - gruppo_proxy
 
-  manager-app:
-    image: ghcr.io/danieleramacci/sito-easydigital-manager:latest
-    container_name: easydigital-manager
+  manager-flask:
+    image: ghcr.io/danieleramacci/sito-easydigital-manager-flask:latest
+    container_name: easydigital-manager-flask
     restart: unless-stopped
     pull_policy: always
+    depends_on:
+      - postgres-v2
     environment:
-      PORT: 3000
+      DATABASE_URL: postgresql+psycopg://${MGR_PG_USER}:${MGR_PG_PASSWORD}@postgres-v2:5432/${MGR_PG_DB}
+      SECRET_KEY: ${MGR_SECRET_KEY}
       WP_BASE_URL: https://${WP_DOMAIN}
       EDA_SSO_SECRET: ${EDA_SSO_SECRET}
-      DATA_DIR: /data
-      SMTP_HOST: ${SMTP_HOST}
-      SMTP_PORT: ${SMTP_PORT}
-      SMTP_USER: ${SMTP_USER}
-      SMTP_PASS: ${SMTP_PASS}
-      SMTP_FROM: ${SMTP_FROM}
-    volumes:
-      - manager_data:/data
+      COOKIE_SECURE: "true"
+      APP_BASE_URL: https://${WP_DOMAIN}
+      MAIL_SERVER: ${SMTP_HOST}
+      MAIL_PORT: ${SMTP_PORT}
+      MAIL_USERNAME: ${SMTP_USER}
+      MAIL_PASSWORD: ${SMTP_PASS}
+      MAIL_DEFAULT_SENDER: ${SMTP_FROM}
+      MAIL_USE_TLS: "true"
     labels:
       - traefik.enable=true
-      - traefik.http.routers.easydigital-manager.rule=Host(`${WP_DOMAIN}`) && ((PathPrefix(`/gestionale`) && !PathPrefix(`/gestionale-2`)) || PathPrefix(`/areapersonale`) || Path(`/logout`))
+      - traefik.http.routers.easydigital-manager.rule=Host(`${WP_DOMAIN}`) && ((PathPrefix(`/gestionale`) && !PathPrefix(`/gestionale-2`)) || PathPrefix(`/registrazione`) || Path(`/logout`))
       - traefik.http.routers.easydigital-manager.entrypoints=websecure
       - traefik.http.routers.easydigital-manager.tls.certresolver=myresolver
       - traefik.http.routers.easydigital-manager.priority=200
-      - traefik.http.services.easydigital-manager.loadbalancer.server.port=3000
+      - traefik.http.services.easydigital-manager.loadbalancer.server.port=5051
     networks:
       - wp_internal
       - gruppo_proxy
