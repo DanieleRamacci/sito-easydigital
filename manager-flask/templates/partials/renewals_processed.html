@@ -1,0 +1,12 @@
+{% if created %}
+<div class="alert alert-success">
+  <strong>Rinnovi processati ({{ created|length }}):</strong>
+  <ul style="margin:6px 0 0;padding-left:18px;">
+    {% for c in created %}
+    <li>{{ c }}</li>
+    {% endfor %}
+  </ul>
+</div>
+{% else %}
+<div class="alert alert-info">Nessun rinnovo scaduto da processare.</div>
+{% endif %}

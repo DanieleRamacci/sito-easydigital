@@ -1,14 +1,15 @@
 {% if rows %}
 <table class="tbl">
-  <thead><tr><th>Azienda</th><th>Referente</th><th>Email</th><th>Telefono</th><th>Stato</th></tr></thead>
+  <thead><tr><th>Azienda</th><th>Referente</th><th>Email</th><th>Telefono</th><th>Stato</th><th></th></tr></thead>
   <tbody>
     {% for c in rows %}
       <tr>
-        <td>{{ c.company or '-' }}</td>
+        <td><a href="/gestionale/clienti/{{ c.id }}">{{ c.company or '-' }}</a></td>
         <td>{{ (c.first_name or '') ~ ' ' ~ (c.last_name or '') }}</td>
         <td>{{ c.email or '-' }}</td>
         <td>{{ c.phone or '-' }}</td>
-        <td>{{ c.status or '-' }}</td>
+        <td><span class="badge badge-status-{{ c.status }}">{{ c.status or '-' }}</span></td>
+        <td><a href="/gestionale/clienti/{{ c.id }}" class="btn-xs">Scheda</a></td>
       </tr>
     {% endfor %}
   </tbody>

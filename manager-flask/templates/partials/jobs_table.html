@@ -4,10 +4,10 @@
   <tbody>
     {% for j in rows %}
       <tr>
-        <td>{{ j.customer_name or '-' }}</td>
+        <td><a href="/gestionale/clienti/{{ j.customer_id }}">{{ j.customer_name or '-' }}</a></td>
         <td>{{ j.title or '-' }}</td>
         <td>{{ j.services_label or '-' }}</td>
-        <td>{{ j.status_label or j.status or '-' }}</td>
+        <td><span class="badge badge-job-{{ j.status }}">{{ j.status_label or j.status or '-' }}</span></td>
         <td>{{ fmt_date(j.dueDate or '') }}</td>
         <td>{{ fmt_money(j.amount) }}</td>
       </tr>

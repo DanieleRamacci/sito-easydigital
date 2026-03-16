@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Setup iniziale — {{ title }}</title>
+    <link rel="stylesheet" href="/static/app.css" />
+  </head>
+  <body class="login-body">
+    <div class="login-card">
+      <div class="brand" style="font-size:1.4rem;font-weight:700;color:#14532d;margin-bottom:8px;">EDA Manager</div>
+      <h1 style="font-size:1.3rem;margin:0 0 6px;">Configurazione iniziale</h1>
+      <p class="muted" style="margin:0 0 20px;font-size:.9rem;">Crea il primo account amministratore.</p>
+
+      {% if error %}
+      <div class="alert alert-danger">{{ error }}</div>
+      {% endif %}
+
+      <form method="POST" action="/gestionale/setup">
+        <div class="form-group">
+          <label>Nome</label>
+          <input type="text" name="name" value="Admin" required />
+        </div>
+        <div class="form-group">
+          <label>Email</label>
+          <input type="email" name="email" required autofocus />
+        </div>
+        <div class="form-group">
+          <label>Password (min. 8 caratteri)</label>
+          <input type="password" name="password" required minlength="8" />
+        </div>
+        <button type="submit" class="btn btn-full">Crea account admin</button>
+      </form>
+    </div>
+  </body>
+</html>

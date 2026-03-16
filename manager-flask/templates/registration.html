@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{ title }}</title>
+    <link rel="stylesheet" href="/static/app.css" />
+  </head>
+  <body class="login-body" style="align-items:flex-start;padding-top:40px;">
+    <div class="login-card" style="max-width:620px;">
+      <div class="brand" style="font-size:1.3rem;font-weight:700;color:#14532d;margin-bottom:4px;">Easy Digital Agency</div>
+      <h1 style="font-size:1.3rem;margin:0 0 6px;">Completa la tua anagrafica</h1>
+      <p class="muted" style="margin:0 0 20px;font-size:.9rem;">Compila i tuoi dati per completare la registrazione.</p>
+
+      <form method="POST" action="/registrazione/{{ token }}">
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Ragione sociale / Nome *</label>
+            <input type="text" name="company" required value="{{ customer.company or '' }}" />
+          </div>
+          <div class="form-group">
+            <label>Nome referente</label>
+            <input type="text" name="first_name" value="{{ customer.first_name or '' }}" />
+          </div>
+          <div class="form-group">
+            <label>Cognome referente</label>
+            <input type="text" name="last_name" value="{{ customer.last_name or '' }}" />
+          </div>
+          <div class="form-group">
+            <label>Telefono</label>
+            <input type="tel" name="phone" value="{{ customer.phone or '' }}" />
+          </div>
+          <div class="form-group">
+            <label>P.IVA / Codice Fiscale</label>
+            <input type="text" name="vat" value="{{ customer.vat or '' }}" />
+          </div>
+          <div class="form-group">
+            <label>Sito web</label>
+            <input type="url" name="website" placeholder="https://..." value="{{ customer.website or '' }}" />
+          </div>
+          <div class="form-group full-width">
+            <label>Indirizzo di fatturazione</label>
+            <input type="text" name="billing_address" value="{{ customer.billing_address or '' }}" />
+          </div>
+          <div class="form-group">
+            <label>PEC</label>
+            <input type="email" name="pec" value="{{ customer.pec or '' }}" />
+          </div>
+          <div class="form-group">
+            <label>Codice SDI</label>
+            <input type="text" name="sdi" maxlength="7" value="{{ customer.sdi or '' }}" />
+          </div>
+        </div>
+        <button type="submit" class="btn btn-full" style="margin-top:14px;">Completa registrazione</button>
+      </form>
+    </div>
+  </body>
+</html>

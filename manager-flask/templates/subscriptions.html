@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="section-header">
+  <h1>Abbonamenti</h1>
+  <a href="/gestionale/abbonamenti/nuovo" class="btn">+ Nuovo abbonamento</a>
+</div>
+
+<form class="filters" hx-get="/gestionale/abbonamenti/table" hx-target="#subs-table" hx-trigger="change from:select">
+  <div></div>
+  <select name="status">
+    <option value="active" {% if status=='active' %}selected{% endif %}>Attivi</option>
+    <option value="cancelled" {% if status=='cancelled' %}selected{% endif %}>Cancellati</option>
+    <option value="" {% if not status %}selected{% endif %}>Tutti</option>
+  </select>
+</form>
+
+<div id="subs-table" class="card">
+  {% include "partials/subscriptions_table.html" %}
+</div>
+{% endblock %}

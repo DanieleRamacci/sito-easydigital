@@ -1,0 +1,41 @@
+{% if rows %}
+<table class="tbl">
+  <thead>
+    <tr>
+      <th>Cliente</th>
+      <th>Servizio</th>
+      <th>Ricorrenza</th>
+      <th>Prossimo rinnovo</th>
+      <th>Importo</th>
+      <th>Stato pag.</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for s in rows %}
+    <tr>
+      <td><a href="/gestionale/clienti/{{ s.customer_id }}">{{ s.customer_name }}</a></td>
+      <td>{{ s.service_name }}</td>
+      <td>{{ s.interval_label if s.billing_type == 'subscription' else 'Una tantum' }}</td>
+      <td>{{ fmt_date(s.renewal_date) }}</td>
+      <td>{{ fmt_money(s.price) }}</td>
+      <td>
+        {% if s.payment_status == 'paid' %}
+          <span class="badge badge-paid">Pagato</span>
+        {% else %}
+          <span class="badge badge-pending">In attesa</span>
+        {% endif %}
+      </td>
+      <td>
+        <a href="/gestionale/abbonamenti/{{ s.sub_id }}/modifica" class="btn-xs btn-outline">Modifica</a>
+        {% if s.debt_id %}
+        <a href="/gestionale/clienti/{{ s.customer_id }}" class="btn-xs">Paga</a>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">Nessun abbonamento trovato.</p>
+{% endif %}

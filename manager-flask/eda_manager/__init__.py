@@ -2,9 +2,9 @@ import click
 from flask import Flask
 
 from .config import Config
-from .extensions import db, migrate
-from .models import DebtItem, Job
-from .services.query import upsert_debt_from_job
+from .extensions import db, mail, migrate
+from .models import AdminUser, DebtItem, Job
+from .services.query import process_renewals, sync_all_debts_from_jobs, upsert_debt_from_job
 from .views.web import bp as web_bp
 
 
@@ -20,21 +20,73 @@ def create_app(config_object=Config):
 
     db.init_app(app)
     migrate.init_app(app, db)
+    mail.init_app(app)
 
     app.register_blueprint(web_bp)
 
+    # -----------------------------------------------------------------------
+    # CLI Commands
+    # -----------------------------------------------------------------------
+
     @app.cli.command("init-db")
     def init_db_command():
+        """Create all tables (safe to run on existing DB — won't drop data)."""
         db.create_all()
-        click.echo("Database inizializzato")
+        click.echo("Database inizializzato.")
+
+    @app.cli.command("fix-schema")
+    def fix_schema_command():
+        """Apply schema fixes for existing databases (drop old unique index, create new)."""
+        with db.engine.connect() as conn:
+            # Drop the old ux_debt_source index if it exists (replaced by ux_debt_job_source)
+            try:
+                conn.execute(db.text("DROP INDEX IF EXISTS ux_debt_source"))
+                conn.commit()
+                click.echo("Indice ux_debt_source rimosso.")
+            except Exception as e:
+                click.echo(f"Nota: {e}")
+
+            # Create new tables (AdminUser, Notification) if they don't exist
+            db.create_all()
+            click.echo("Nuove tabelle create (admin_users, notifications).")
 
     @app.cli.command("sync-debts")
     def sync_debts_command():
+        """Re-sync all Job amounts to their DebtItems."""
         db.create_all()
-        for job in Job.query.all():
-            upsert_debt_from_job(job)
+        sync_all_debts_from_jobs()
+        click.echo("Debiti riallineati da jobs.")
+
+    @app.cli.command("process-renewals")
+    def process_renewals_command():
+        """Generate DebtItems and Notifications for subscription renewals due today or earlier."""
+        db.create_all()
+        created = process_renewals()
+        if created:
+            click.echo(f"Rinnovi processati: {', '.join(created)}")
+        else:
+            click.echo("Nessun rinnovo da processare.")
+
+    @app.cli.command("create-admin")
+    @click.argument("email")
+    @click.argument("password")
+    @click.option("--name", default="Admin", help="Nome visualizzato")
+    def create_admin_command(email: str, password: str, name: str):
+        """Create a local admin user. Usage: flask create-admin EMAIL PASSWORD"""
+        from .auth import hash_password
+        db.create_all()
+        existing = AdminUser.query.filter(AdminUser.email == email.lower()).first()
+        if existing:
+            click.echo(f"Admin con email {email} già esistente.")
+            return
+        admin = AdminUser(
+            email=email.lower().strip(),
+            name=name,
+            password_hash=hash_password(password),
+        )
+        db.session.add(admin)
         db.session.commit()
-        click.echo("Debiti riallineati da jobs")
+        click.echo(f"Admin creato: {email}")
 
     @app.cli.command("import-store")
     def import_store_command():

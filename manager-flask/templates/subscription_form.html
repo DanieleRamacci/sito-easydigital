@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block content %}
+<a href="/gestionale/abbonamenti" class="back-link">← Abbonamenti</a>
+<h1>{% if sub %}Modifica abbonamento #{{ sub.id }}{% else %}Nuovo abbonamento{% endif %}</h1>
+
+{% if error %}
+<div class="alert alert-danger">{{ error }}</div>
+{% endif %}
+
+<div class="card">
+  <form method="POST">
+    <div class="form-grid">
+      {% if not sub %}
+      <div class="form-group">
+        <label>Cliente *</label>
+        <select name="customer_id" required>
+          <option value="">— Seleziona cliente —</option>
+          {% for c in customers %}
+          <option value="{{ c.id }}"
+            {% if (preselect_customer and c.id|string == preselect_customer) or (sub and c.id == sub.customer_id) %}selected{% endif %}>
+            {{ c.company or (c.first_name ~ ' ' ~ c.last_name) }}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+      {% endif %}
+
+      <div class="form-group">
+        <label>Servizio *</label>
+        <select name="service_id" required id="service-select" onchange="fillPrice()">
+          <option value="">— Seleziona servizio —</option>
+          {% for s in services %}
+          <option value="{{ s.id }}"
+            data-price="{{ s.price }}"
+            data-type="{{ s.billing_type }}"
+            data-interval="{{ s.billing_interval }}"
+            {% if sub and s.id == sub.service_id %}selected{% endif %}>
+            {{ s.name }} ({{ fmt_money(s.price) }})
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label>Tipo fatturazione *</label>
+        <select name="billing_type" id="billing-type">
+          <option value="subscription" {% if not sub or sub.billing_type == 'subscription' %}selected{% endif %}>Abbonamento ricorrente</option>
+          <option value="one_time" {% if sub and sub.billing_type == 'one_time' %}selected{% endif %}>Una tantum</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label>Ricorrenza</label>
+        <select name="billing_interval">
+          <option value="annual" {% if not sub or sub.billing_interval == 'annual' %}selected{% endif %}>Annuale</option>
+          <option value="semiannual" {% if sub and sub.billing_interval == 'semiannual' %}selected{% endif %}>Semestrale</option>
+          <option value="monthly" {% if sub and sub.billing_interval == 'monthly' %}selected{% endif %}>Mensile</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label>Data acquisto *</label>
+        <input type="date" name="purchase_date" required
+          value="{{ sub.purchase_date.isoformat() if sub and sub.purchase_date else '' }}" />
+      </div>
+
+      <div class="form-group">
+        <label>Data prossimo rinnovo</label>
+        <input type="date" name="renewal_date"
+          value="{{ sub.renewal_date.isoformat() if sub and sub.renewal_date else '' }}" />
+      </div>
+
+      <div class="form-group">
+        <label>Prezzo vendita *</label>
+        <input type="number" name="price_at_sale" id="price-field" step="0.01" min="0" required
+          value="{{ sub.price_at_sale if sub else '' }}" />
+      </div>
+
+      {% if sub %}
+      <div class="form-group">
+        <label>Stato</label>
+        <select name="status">
+          <option value="active" {% if sub.status == 'active' %}selected{% endif %}>Attivo</option>
+          <option value="cancelled" {% if sub.status == 'cancelled' %}selected{% endif %}>Cancellato</option>
+          <option value="suspended" {% if sub.status == 'suspended' %}selected{% endif %}>Sospeso</option>
+        </select>
+      </div>
+      {% endif %}
+
+      {% if not sub %}
+      <div class="form-group">
+        <label>
+          <input type="checkbox" name="create_debt" value="1" checked />
+          Genera subito la voce di debito per questo rinnovo
+        </label>
+      </div>
+      {% endif %}
+
+      <div class="form-group full-width">
+        <label>Note</label>
+        <textarea name="notes" rows="3" placeholder="Note interne...">{{ sub.notes if sub else '' }}</textarea>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:10px;margin-top:10px;">
+      <button type="submit" class="btn">{% if sub %}Salva modifiche{% else %}Crea abbonamento{% endif %}</button>
+      <a href="/gestionale/abbonamenti" class="btn btn-outline">Annulla</a>
+    </div>
+  </form>
+</div>
+
+<script>
+function fillPrice() {
+  const sel = document.getElementById('service-select');
+  const opt = sel.selectedOptions[0];
+  if (!opt || !opt.value) return;
+  const priceField = document.getElementById('price-field');
+  if (!priceField.value) {
+    priceField.value = opt.dataset.price || '';
+  }
+  const btSel = document.getElementById('billing-type');
+  if (opt.dataset.type) btSel.value = opt.dataset.type;
+}
+</script>
+{% endblock %}

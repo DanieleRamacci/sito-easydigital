@@ -1,0 +1,43 @@
+{% if rows %}
+<table class="tbl">
+  <thead>
+    <tr>
+      <th>Cliente</th>
+      <th>Servizio</th>
+      <th>Scadenza</th>
+      <th>Ricorrenza</th>
+      <th>Importo</th>
+      <th>Stato</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in rows %}
+    <tr>
+      <td><a href="/gestionale/clienti/{{ r.customer_id }}">{{ r.customer_name }}</a></td>
+      <td>{{ r.service_name }}</td>
+      <td>
+        {{ fmt_date(r.renewal_date) }}
+      </td>
+      <td>{{ r.interval_label }}</td>
+      <td>{{ fmt_money(r.price) }}</td>
+      <td>
+        {% if r.payment_status == 'paid' %}
+          <span class="badge badge-paid">Pagato</span>
+        {% else %}
+          <span class="badge badge-pending">In attesa</span>
+        {% endif %}
+      </td>
+      <td>
+        <a href="/gestionale/clienti/{{ r.customer_id }}" class="btn-xs">Scheda cliente</a>
+        {% if r.debt_id %}
+        <span class="badge badge-info">Fattura generata</span>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">Nessun rinnovo in scadenza nel periodo selezionato.</p>
+{% endif %}

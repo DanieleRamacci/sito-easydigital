@@ -1,27 +1,101 @@
 {% extends "base.html" %}
 {% block content %}
 <h1>Dashboard</h1>
+
 <section class="kpi-grid">
   <article class="kpi"><div>Clienti</div><strong>{{ kpi.customers }}</strong></article>
   <article class="kpi"><div>Lavori</div><strong>{{ kpi.jobs }}</strong></article>
   <article class="kpi"><div>Ticket Aperti</div><strong>{{ kpi.tickets_open }}</strong></article>
   <article class="kpi"><div>Debito Residuo</div><strong>{{ fmt_money(kpi.debt_outstanding) }}</strong></article>
+  <article class="kpi kpi-warn"><div>Rinnovi in scadenza</div><strong>{{ kpi.renewals_this_month }}</strong></article>
 </section>
 
+{% if notifications %}
 <section class="card">
-  <h2>Ultimi Lavori</h2>
-  {% include "partials/jobs_table.html" with context %}
+  <h2>Notifiche <span class="badge badge-danger">{{ notifications|length }}</span></h2>
+  <ul class="notif-list">
+    {% for n in notifications %}
+    <li class="notif notif-{{ n.notif_type }}">
+      <div class="notif-body">
+        <strong>{{ n.title }}</strong>
+        {% if n.message %}<span class="muted"> — {{ n.message }}</span>{% endif %}
+      </div>
+      <div class="notif-meta">
+        {{ fmt_date(n.created_at) }}
+        {% if n.customer_id %}
+          <a href="/gestionale/clienti/{{ n.customer_id }}" class="btn-xs">Vai al cliente</a>
+        {% endif %}
+        <button class="btn-xs btn-outline"
+          hx-post="/gestionale/notifications/{{ n.id }}/read"
+          hx-target="closest li"
+          hx-swap="outerHTML">Segna letto</button>
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
 </section>
+{% endif %}
+
+{% if renewals_widget %}
 <section class="card">
-  <h2>Debiti in evidenza</h2>
-  {% include "partials/debts_table.html" with context %}
+  <div class="section-header">
+    <h2>Rinnovi questo mese</h2>
+    <a href="/gestionale/rinnovi" class="btn btn-sm">Vedi tutti</a>
+  </div>
+  <table class="tbl">
+    <thead><tr><th>Cliente</th><th>Servizio</th><th>Scadenza</th><th>Importo</th><th>Stato</th></tr></thead>
+    <tbody>
+      {% for r in renewals_widget %}
+      <tr class="{% if r.overdue %}row-danger{% endif %}">
+        <td><a href="/gestionale/clienti/{{ r.customer_id }}">{{ r.customer_name }}</a></td>
+        <td>{{ r.service_name }}</td>
+        <td>{{ fmt_date(r.renewal_date) }}{% if r.overdue %} <span class="badge badge-danger">Scaduto</span>{% endif %}</td>
+        <td>{{ fmt_money(r.price) }}</td>
+        <td>
+          {% if r.payment_status == 'paid' %}
+            <span class="badge badge-paid">Pagato</span>
+          {% else %}
+            <span class="badge badge-pending">In attesa</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
 </section>
-<section class="card">
-  <h2>Clienti recenti</h2>
-  {% include "partials/customers_table.html" with context %}
-</section>
-<section class="card">
-  <h2>Ticket recenti</h2>
-  {% include "partials/tickets_table.html" with context %}
-</section>
+{% endif %}
+
+<div class="grid-2">
+  <section class="card">
+    <div class="section-header">
+      <h2>Ultimi Lavori</h2>
+      <a href="/gestionale/lavori" class="btn btn-sm">Tutti</a>
+    </div>
+    {% include "partials/jobs_table.html" with context %}
+  </section>
+  <section class="card">
+    <div class="section-header">
+      <h2>Debiti in evidenza</h2>
+      <a href="/gestionale/debiti" class="btn btn-sm">Tutti</a>
+    </div>
+    {% include "partials/debts_table.html" with context %}
+  </section>
+</div>
+
+<div class="grid-2">
+  <section class="card">
+    <div class="section-header">
+      <h2>Clienti recenti</h2>
+      <a href="/gestionale/clienti" class="btn btn-sm">Tutti</a>
+    </div>
+    {% include "partials/customers_table.html" with context %}
+  </section>
+  <section class="card">
+    <div class="section-header">
+      <h2>Ticket recenti</h2>
+      <a href="/gestionale/ticket" class="btn btn-sm">Tutti</a>
+    </div>
+    {% include "partials/tickets_table.html" with context %}
+  </section>
+</div>
 {% endblock %}

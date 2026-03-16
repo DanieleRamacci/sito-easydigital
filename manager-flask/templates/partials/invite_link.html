@@ -1,0 +1,16 @@
+<div class="alert alert-success" style="margin-top:10px;">
+  <strong>Link di registrazione generato:</strong><br />
+  <div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap;">
+    <input type="text" id="invite-url" value="{{ invite_url }}" readonly style="flex:1;min-width:280px;" />
+    <button class="btn btn-sm" onclick="copyInviteUrl()">Copia link</button>
+  </div>
+  <p class="muted" style="margin:6px 0 0;font-size:.85rem;">Il link scade tra 7 giorni. Invialo al cliente via email.</p>
+</div>
+<script>
+function copyInviteUrl() {
+  const el = document.getElementById('invite-url');
+  el.select();
+  document.execCommand('copy');
+  alert('Link copiato!');
+}
+</script>

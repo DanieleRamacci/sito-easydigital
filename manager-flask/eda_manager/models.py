@@ -77,6 +77,12 @@ class Customer(TimestampMixin, db.Model):
     sdi = db.Column(db.Text, default="")
     status = db.Column(db.String(32), default="lead", nullable=False)
     wp_user_id = db.Column(db.BigInteger)
+
+    jobs = db.relationship("Job", backref="customer", lazy="dynamic", cascade="all, delete-orphan")
+    subscriptions = db.relationship("Subscription", backref="customer", lazy="dynamic", cascade="all, delete-orphan")
+    debt_items = db.relationship("DebtItem", backref="customer", lazy="dynamic", cascade="all, delete-orphan")
+    invites = db.relationship("Invite", backref="customer", lazy="dynamic", cascade="all, delete-orphan")
+
     __table_args__ = (db.Index("ux_customers_email", db.func.lower(email), unique=True),)
 
 
@@ -140,6 +146,9 @@ class Subscription(TimestampMixin, db.Model):
     )
     notes = db.Column(db.Text, default="")
     last_paid_at = db.Column(db.Date)
+
+    service = db.relationship("Service", lazy="joined")
+
     __table_args__ = (
         db.Index("ix_subscriptions_renewal", "renewal_date"),
     )
@@ -172,10 +181,21 @@ class DebtItem(TimestampMixin, db.Model):
     amount_total = db.Column(db.Numeric(12, 2), default=0, nullable=False)
     amount_paid = db.Column(db.Numeric(12, 2), default=0, nullable=False)
     status = db.Column(db.String(32), default="open", nullable=False)
+
+    payment_entries = db.relationship("PaymentEntry", backref="debt_item", lazy="dynamic", cascade="all, delete-orphan")
+
     __table_args__ = (
         db.CheckConstraint("source_type in ('subscription', 'job', 'manual')", name="ck_debt_source_type"),
         db.CheckConstraint("item_type in ('subscription', 'one_time')", name="ck_debt_item_type"),
-        db.Index("ux_debt_source", "source_type", "source_id", unique=True, postgresql_where=db.text("source_id is not null")),
+        # Unique only for job source to avoid duplicate debt per job.
+        # Subscriptions can have multiple historical debt items (one per renewal cycle).
+        db.Index(
+            "ux_debt_job_source",
+            "source_type",
+            "source_id",
+            unique=True,
+            postgresql_where=db.text("source_type = 'job' AND source_id IS NOT NULL"),
+        ),
     )
 
 
@@ -236,3 +256,26 @@ class JobService(db.Model):
     service_id = db.Column(db.BigInteger, db.ForeignKey("services.id"), nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     __table_args__ = (db.UniqueConstraint("job_id", "service_id", name="ux_job_service"),)
+
+
+class AdminUser(db.Model):
+    __tablename__ = "admin_users"
+
+    id = db.Column(db.BigInteger, primary_key=True)
+    email = db.Column(db.Text, nullable=False, unique=True)
+    password_hash = db.Column(db.Text, nullable=False)
+    name = db.Column(db.Text, default="")
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+
+class Notification(db.Model):
+    __tablename__ = "notifications"
+
+    id = db.Column(db.BigInteger, primary_key=True)
+    title = db.Column(db.Text, nullable=False)
+    message = db.Column(db.Text, default="")
+    notif_type = db.Column(db.String(32), default="info", nullable=False)  # info, warning, danger
+    read = db.Column(db.Boolean, default=False, nullable=False)
+    customer_id = db.Column(db.BigInteger, db.ForeignKey("customers.id", ondelete="SET NULL"))
+    subscription_id = db.Column(db.BigInteger, db.ForeignKey("subscriptions.id", ondelete="SET NULL"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
