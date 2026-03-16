@@ -83,6 +83,7 @@ def home():
 # ---------------------------------------------------------------------------
 
 @bp.get("/gestionale/auth/callback")
+@bp.get("/areapersonale/auth/callback")
 def auth_callback():
     """Receives the JWT token from WordPress SSO and sets the session cookie."""
     token = request.args.get("token", "").strip()
