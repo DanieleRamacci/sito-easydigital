@@ -44,42 +44,6 @@ jobs:
           tags: ${{ steps.meta_wp.outputs.tags }}
           labels: ${{ steps.meta_wp.outputs.labels }}
 
-      - name: Docker metadata (Manager App)
-        id: meta_mgr
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ github.event.repository.name }}-manager
-          tags: |
-            type=raw,value=latest
-            type=sha
-
-      - name: Build and push (Manager App)
-        uses: docker/build-push-action@v6
-        with:
-          context: ./manager-app
-          file: manager-app/Dockerfile
-          push: true
-          tags: ${{ steps.meta_mgr.outputs.tags }}
-          labels: ${{ steps.meta_mgr.outputs.labels }}
-
-      - name: Docker metadata (Backend v2)
-        id: meta_backend_v2
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ github.event.repository.name }}-backend
-          tags: |
-            type=raw,value=latest
-            type=sha
-
-      - name: Build and push (Backend v2)
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: apps/backend/Dockerfile
-          push: true
-          tags: ${{ steps.meta_backend_v2.outputs.tags }}
-          labels: ${{ steps.meta_backend_v2.outputs.labels }}
-
       - name: Docker metadata (Manager Flask)
         id: meta_mgr_flask
         uses: docker/metadata-action@v5
