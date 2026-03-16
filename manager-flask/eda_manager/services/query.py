@@ -764,3 +764,103 @@ def mark_notification_read(notif_id: int) -> None:
     if n:
         n.read = True
         db.session.commit()
+
+
+# ---------------------------------------------------------------------------
+# WordPress API integration
+# ---------------------------------------------------------------------------
+
+def register_wp_user(wp_base_url: str, email: str, display_name: str, password: str) -> tuple[bool, dict]:
+    """Call /wp-json/eda-auth/v1/register to create a WP subscriber.
+    Returns (success: bool, data: dict).
+    """
+    import re
+    import requests as _requests
+
+    # Build a clean username from email local part
+    username = re.sub(r"[^a-z0-9_]", "", email.split("@")[0].lower()) or "user"
+
+    try:
+        resp = _requests.post(
+            f"{wp_base_url.rstrip('/')}/wp-json/eda-auth/v1/register",
+            json={"username": username, "email": email, "display_name": display_name, "password": password},
+            timeout=10,
+        )
+        data = resp.json()
+        return resp.ok, data
+    except Exception as e:
+        return False, {"message": str(e)}
+
+
+# ---------------------------------------------------------------------------
+# Customer personal area (areapersonale)
+# ---------------------------------------------------------------------------
+
+def customer_area_data(wp_user_id: int, user_email: str) -> Optional[dict[str, Any]]:
+    """Return data for the customer's personal area, matched by wp_user_id or email."""
+    customer = None
+    if wp_user_id:
+        customer = Customer.query.filter_by(wp_user_id=wp_user_id).first()
+    if not customer and user_email:
+        customer = Customer.query.filter(
+            Customer.email == user_email.lower().strip()
+        ).first()
+    if not customer:
+        return None
+
+    # Active subscriptions
+    active_subs = (
+        Subscription.query
+        .filter_by(customer_id=customer.id, status="active")
+        .order_by(Subscription.renewal_date.asc())
+        .all()
+    )
+    subs_out = []
+    for sub in active_subs:
+        service = db.session.get(Service, sub.service_id)
+        open_debt = DebtItem.query.filter_by(
+            source_type="subscription", source_id=sub.id, status="open"
+        ).first()
+        outstanding = debt_outstanding(open_debt.amount_total, open_debt.amount_paid) if open_debt else Decimal("0")
+        subs_out.append({
+            "service_name": service.name if service else "-",
+            "billing_interval": enum_value(sub.billing_interval),
+            "interval_label": BILLING_INTERVAL_LABELS.get(enum_value(sub.billing_interval), "-"),
+            "renewal_date": sub.renewal_date,
+            "price": parse_decimal(sub.price_at_sale),
+            "payment_status": "paid" if outstanding <= Decimal("0.01") else "pending",
+            "outstanding": outstanding,
+        })
+
+    # Open debts
+    open_debts_raw = (
+        DebtItem.query
+        .filter_by(customer_id=customer.id, status="open")
+        .order_by(DebtItem.due_date.asc())
+        .all()
+    )
+    open_debts = []
+    total_outstanding = Decimal("0")
+    for d in open_debts_raw:
+        outstanding = debt_outstanding(d.amount_total, d.amount_paid)
+        total_outstanding += outstanding
+        open_debts.append({
+            "label": d.label,
+            "item_type": d.item_type,
+            "due_date": d.due_date,
+            "amount_total": parse_decimal(d.amount_total),
+            "outstanding": outstanding,
+        })
+
+    # Upcoming renewals (next 60 days)
+    today = date.today()
+    cutoff = today + relativedelta(days=60)
+    upcoming_renewals = [s for s in subs_out if s["renewal_date"] and today <= s["renewal_date"] <= cutoff]
+
+    return {
+        "customer": customer,
+        "subscriptions": subs_out,
+        "open_debts": open_debts,
+        "total_outstanding": total_outstanding,
+        "upcoming_renewals": upcoming_renewals,
+    }

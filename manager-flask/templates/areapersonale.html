@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Area Personale – Easy Digital Agency</title>
+    <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+    <link rel="stylesheet" href="/static/app.css" />
+    <style>
+      .ap-shell { max-width: 900px; margin: 0 auto; padding: 32px 16px; }
+      .ap-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 32px; }
+      .ap-brand { font-size: 1.1rem; font-weight: 700; color: #14532d; }
+      .ap-section { margin-bottom: 36px; }
+      .ap-section h2 { font-size: 1.05rem; font-weight: 700; margin: 0 0 14px; border-bottom: 2px solid #e5e7eb; padding-bottom: 6px; }
+      .ap-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
+      .ap-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 16px; }
+      .ap-card .label { font-size: .8rem; color: #6b7280; margin-bottom: 4px; }
+      .ap-card .value { font-size: 1.1rem; font-weight: 700; color: #111827; }
+      .ap-card .sub { font-size: .82rem; color: #6b7280; margin-top: 4px; }
+      .debt-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid #f3f4f6; }
+      .debt-row:last-child { border-bottom: none; }
+      .renewal-list { list-style: none; padding: 0; margin: 0; }
+      .renewal-list li { padding: 8px 0; border-bottom: 1px solid #f3f4f6; font-size: .9rem; display: flex; justify-content: space-between; }
+      .renewal-list li:last-child { border-bottom: none; }
+      .empty-msg { color: #6b7280; font-size: .9rem; padding: 12px 0; }
+    </style>
+  </head>
+  <body style="background:#f9fafb;">
+    <div class="ap-shell">
+      <div class="ap-header">
+        <div>
+          <div class="ap-brand">Easy Digital Agency</div>
+          <div style="font-size:.9rem;color:#6b7280;">Area Personale</div>
+        </div>
+        <a href="/logout" class="btn" style="font-size:.85rem;">Esci</a>
+      </div>
+
+      {% if customer %}
+      <div class="ap-section">
+        <h2>Ciao, {{ customer.company or customer.first_name or 'Cliente' }}</h2>
+        <p style="font-size:.9rem;color:#6b7280;margin:0;">
+          {{ customer.email }}
+          {% if customer.phone %} &middot; {{ customer.phone }}{% endif %}
+        </p>
+      </div>
+
+      <!-- KPI strip -->
+      <div class="ap-cards" style="margin-bottom:32px;">
+        <div class="ap-card">
+          <div class="label">Abbonamenti attivi</div>
+          <div class="value">{{ subscriptions | length }}</div>
+        </div>
+        <div class="ap-card">
+          <div class="label">Debiti aperti</div>
+          <div class="value" style="color:{% if open_debts %}#dc2626{% else %}#16a34a{% endif %};">
+            {{ open_debts | length }}
+          </div>
+        </div>
+        <div class="ap-card">
+          <div class="label">Prossimo rinnovo</div>
+          <div class="value" style="font-size:.95rem;">
+            {% if upcoming_renewals %}
+              {{ upcoming_renewals[0]["renewal_date"].strftime('%d/%m/%Y') }}
+              <div class="sub">{{ upcoming_renewals[0]["service_name"] }}</div>
+            {% else %}
+              <span style="color:#6b7280;font-size:.9rem;">Nessuno</span>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+
+      <!-- Subscriptions -->
+      <div class="ap-section">
+        <h2>I tuoi abbonamenti</h2>
+        {% if subscriptions %}
+        <div class="ap-cards">
+          {% for sub in subscriptions %}
+          <div class="ap-card">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;">
+              <div style="font-weight:600;font-size:.95rem;">{{ sub.service_name }}</div>
+              <span class="badge badge-{{ 'green' if sub.payment_status == 'paid' else 'yellow' }}">
+                {{ 'In regola' if sub.payment_status == 'paid' else 'Da pagare' }}
+              </span>
+            </div>
+            <div class="label">Importo</div>
+            <div class="value">€ {{ "%.2f"|format(sub.price) }}</div>
+            {% if sub.outstanding and sub.outstanding > 0 %}
+            <div class="sub" style="color:#dc2626;">Residuo: € {{ "%.2f"|format(sub.outstanding) }}</div>
+            {% endif %}
+            {% if sub.renewal_date %}
+            <div class="sub">Rinnovo: {{ sub.renewal_date.strftime('%d/%m/%Y') }}</div>
+            {% endif %}
+            <div class="sub">{{ sub.interval_label }}</div>
+          </div>
+          {% endfor %}
+        </div>
+        {% else %}
+        <p class="empty-msg">Nessun abbonamento attivo.</p>
+        {% endif %}
+      </div>
+
+      <!-- Open debts -->
+      <div class="ap-section">
+        <h2>Pagamenti in sospeso</h2>
+        {% if open_debts %}
+        <div style="background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:4px 16px;">
+          {% for debt in open_debts %}
+          <div class="debt-row">
+            <div>
+              <div style="font-size:.9rem;font-weight:600;">{{ debt.label or 'Debito' }}</div>
+              <div style="font-size:.8rem;color:#6b7280;">
+                Scadenza: {{ debt.due_date.strftime('%d/%m/%Y') if debt.due_date else '—' }}
+              </div>
+            </div>
+            <div style="text-align:right;">
+              <div style="font-weight:700;color:#dc2626;">
+                € {{ "%.2f"|format(debt.outstanding) }}
+              </div>
+              <div style="font-size:.8rem;color:#6b7280;">
+                su € {{ "%.2f"|format(debt.amount_total) }}
+              </div>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+        {% else %}
+        <p class="empty-msg">Nessun pagamento in sospeso. Tutto in regola!</p>
+        {% endif %}
+      </div>
+
+      <!-- Upcoming renewals -->
+      {% if upcoming_renewals %}
+      <div class="ap-section">
+        <h2>Rinnovi in arrivo (30 giorni)</h2>
+        <div style="background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:4px 16px;">
+          <ul class="renewal-list">
+            {% for r in upcoming_renewals %}
+            <li>
+              <span>{{ r["service_name"] }}</span>
+              <span style="font-weight:600;">{{ r["renewal_date"].strftime('%d/%m/%Y') }}</span>
+            </li>
+            {% endfor %}
+          </ul>
+        </div>
+      </div>
+      {% endif %}
+
+      {% else %}
+      <div style="text-align:center;padding:60px 0;color:#6b7280;">
+        <p>Profilo non trovato. Contatta il supporto.</p>
+        <a href="mailto:info@easydigitalagency.it" class="btn" style="margin-top:12px;">Contatta supporto</a>
+      </div>
+      {% endif %}
+    </div>
+  </body>
+</html>

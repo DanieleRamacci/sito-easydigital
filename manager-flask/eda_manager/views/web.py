@@ -4,24 +4,23 @@ import jwt
 from flask import (
     Blueprint,
     current_app,
-    flash,
     make_response,
     redirect,
     render_template,
     request,
-    url_for,
 )
 from flask_mail import Message
 
-from ..auth import hash_password, login_local_admin, logout_admin, require_admin, sanitize_next
+from ..auth import require_admin, require_customer, sanitize_next
 from ..extensions import db, mail
-from ..models import AdminUser, Customer, DebtItem, Invite, Notification, Service, Subscription
+from ..models import Customer, DebtItem, Invite, Notification, Service, Subscription
 from ..services.query import (
     BILLING_INTERVAL_LABELS,
     JOB_STATUS_LABELS,
     add_payment,
     advance_renewal,
     create_invite,
+    customer_area_data,
     customer_detail_data,
     customers_query,
     dashboard_data,
@@ -36,6 +35,7 @@ from ..services.query import (
     parse_decimal,
     parse_money,
     process_renewals,
+    register_wp_user,
     renewals_query,
     subscriptions_query,
     tickets_query,
@@ -79,11 +79,12 @@ def home():
 
 
 # ---------------------------------------------------------------------------
-# Auth — SSO callback + local login + logout
+# Auth — SSO callback (WordPress) + logout
 # ---------------------------------------------------------------------------
 
 @bp.get("/gestionale/auth/callback")
 def auth_callback():
+    """Receives the JWT token from WordPress SSO and sets the session cookie."""
     token = request.args.get("token", "").strip()
     next_path = sanitize_next(request.args.get("next"))
     if not token:
@@ -106,36 +107,9 @@ def auth_callback():
     return resp
 
 
-@bp.get("/gestionale/login")
-def login_page():
-    if request.args.get("next"):
-        next_path = sanitize_next(request.args.get("next"))
-    else:
-        next_path = "/gestionale"
-    return render_template("login.html", title=current_app.config["APP_TITLE"], next=next_path)
-
-
-@bp.post("/gestionale/login")
-def login_submit():
-    email = (request.form.get("email") or "").strip()
-    password = request.form.get("password") or ""
-    next_path = sanitize_next(request.form.get("next"))
-
-    if login_local_admin(email, password):
-        return redirect(next_path)
-
-    return render_template(
-        "login.html",
-        title=current_app.config["APP_TITLE"],
-        next=next_path,
-        error="Email o password non corretti.",
-    )
-
-
 @bp.get("/logout")
 def logout():
-    logout_admin()
-    resp = make_response(redirect("/gestionale/login"))
+    resp = make_response(redirect("/"))
     resp.delete_cookie(current_app.config["SESSION_COOKIE"], path="/")
     return resp
 
@@ -525,11 +499,15 @@ def ticket_status_update(ticket_id: int):
 
 
 # ---------------------------------------------------------------------------
-# Registrazione cliente via invito
+# Registrazione cliente via invito (areapersonale/invito — same path as server.js)
 # ---------------------------------------------------------------------------
 
-@bp.get("/registrazione/<token>")
-def registration_page(token: str):
+@bp.get("/areapersonale/invito")
+def registration_page():
+    token = request.args.get("token", "").strip()
+    msg = request.args.get("msg", "")
+    if not token:
+        return render_template("registration_invalid.html", title="Link non valido")
     invite = get_invite_by_token(token)
     if not invite:
         return render_template("registration_invalid.html", title="Link non valido")
@@ -540,11 +518,13 @@ def registration_page(token: str):
         invite=invite,
         customer=customer,
         token=token,
+        msg=msg,
     )
 
 
-@bp.post("/registrazione/<token>")
-def registration_submit(token: str):
+@bp.post("/areapersonale/invito")
+def registration_submit():
+    token = (request.form.get("token") or "").strip()
     invite = get_invite_by_token(token)
     if not invite:
         return render_template("registration_invalid.html", title="Link non valido")
@@ -553,7 +533,19 @@ def registration_submit(token: str):
     if not customer:
         return "Errore interno", 500
 
-    customer.company = (request.form.get("company") or customer.company).strip()
+    password = (request.form.get("password") or "").strip()
+    if not password:
+        return render_template(
+            "registration.html",
+            title="Completa la tua registrazione",
+            invite=invite,
+            customer=customer,
+            token=token,
+            msg="La password è obbligatoria.",
+        )
+
+    # Update customer data from form
+    customer.company = (request.form.get("company") or customer.company or "").strip()
     customer.first_name = (request.form.get("first_name") or "").strip()
     customer.last_name = (request.form.get("last_name") or "").strip()
     customer.phone = (request.form.get("phone") or "").strip()
@@ -562,40 +554,66 @@ def registration_submit(token: str):
     customer.pec = (request.form.get("pec") or "").strip()
     customer.sdi = (request.form.get("sdi") or "").strip()
     customer.website = (request.form.get("website") or "").strip()
-    customer.status = "active"
 
+    # Register user on WordPress via eda-auth plugin
+    wp_base = current_app.config.get("WP_BASE_URL", "")
+    if not wp_base:
+        return "WP_BASE_URL non configurato", 500
+
+    display_name = f"{customer.first_name} {customer.last_name}".strip() or customer.company or customer.email
+    ok, data = register_wp_user(wp_base, customer.email, display_name, password)
+    if not ok:
+        error_msg = data.get("message", "Errore durante la registrazione su WordPress.")
+        return render_template(
+            "registration.html",
+            title="Completa la tua registrazione",
+            invite=invite,
+            customer=customer,
+            token=token,
+            msg=error_msg,
+        )
+
+    # Save wp_user_id and complete invite
+    customer.wp_user_id = int(data.get("user_id") or 0) or None
+    customer.status = "active"
     invite.status = "completed"
     invite.completed_at = datetime.utcnow()
     db.session.commit()
 
-    return render_template("registration_done.html", title="Registrazione completata", customer=customer)
+    wp_login_url = f"{wp_base}/wp-json/eda-auth/v1/sso-start?next=/areapersonale"
+    return render_template(
+        "registration_done.html",
+        title="Registrazione completata",
+        customer=customer,
+        wp_login_url=wp_login_url,
+    )
 
 
 # ---------------------------------------------------------------------------
-# Admin setup (create first admin user — only if no admin exists)
+# Area personale cliente (richiede qualsiasi JWT WordPress valido)
 # ---------------------------------------------------------------------------
 
-@bp.get("/gestionale/setup")
-def setup_page():
-    if AdminUser.query.count() > 0:
-        return redirect("/gestionale/login")
-    return render_template("setup.html", title="Configurazione iniziale")
+@bp.get("/areapersonale")
+@require_customer
+def areapersonale():
+    from flask import g
+    wp_user_id = int(g.user.get("sub") or 0)
+    user_email = str(g.user.get("email") or "").lower()
+    data = customer_area_data(wp_user_id, user_email) or {}
+    return render_template(
+        "areapersonale.html",
+        title="La tua area personale",
+        customer=data.get("customer"),
+        subscriptions=data.get("subscriptions", []),
+        open_debts=data.get("open_debts", []),
+        upcoming_renewals=data.get("upcoming_renewals", []),
+        user=g.user,
+    )
 
 
-@bp.post("/gestionale/setup")
-def setup_submit():
-    if AdminUser.query.count() > 0:
-        return redirect("/gestionale/login")
-    name = (request.form.get("name") or "Admin").strip()
-    email = (request.form.get("email") or "").strip().lower()
-    password = request.form.get("password") or ""
-    if not email or len(password) < 8:
-        return render_template(
-            "setup.html",
-            title="Configurazione iniziale",
-            error="Email valida e password di almeno 8 caratteri richiesti.",
-        )
-    admin = AdminUser(email=email, name=name, password_hash=hash_password(password))
-    db.session.add(admin)
-    db.session.commit()
-    return redirect("/gestionale/login?setup=ok")
+# Keep legacy /registrazione/<token> redirect for backwards compatibility
+@bp.get("/registrazione/<token>")
+def registration_legacy_redirect(token: str):
+    return redirect(f"/areapersonale/invito?token={token}")
+
+

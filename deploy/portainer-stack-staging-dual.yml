@@ -37,12 +37,15 @@ services:
       WORDPRESS_DB_USER: ${MYSQL_USER}
       WORDPRESS_DB_PASSWORD: ${MYSQL_PASSWORD}
       WORDPRESS_TABLE_PREFIX: ${WORDPRESS_TABLE_PREFIX}
-      WORDPRESS_CONFIG_EXTRA: |
+      WORDPRESS_CONFIG_EXTRA:
         define('WP_CACHE', true);
         define('WP_REDIS_HOST', '${REDIS_HOST}');
         define('WP_REDIS_PORT', (int) '${REDIS_PORT}');
         define('EDA_SSO_SECRET', '${EDA_SSO_SECRET}');
         define('EDA_AUTH_CALLBACK_URL', 'https://${WP_DOMAIN}/api/auth/callback');
+        define('WP_HOME', 'https://www.easydigitalagency.it');
+        define('WP_SITEURL', 'https://www.easydigitalagency.it');
+
     volumes:
       - wp_data:/var/www/html
     labels:
@@ -64,6 +67,18 @@ services:
       - traefik.http.middlewares.easydigital-sec-headers.headers.browserXssFilter=true
       - traefik.http.middlewares.easydigital-sec-headers.headers.contentTypeNosniff=true
       - traefik.http.routers.easydigital-secure.middlewares=easydigital-sec-headers
+      - traefik.http.routers.easydigital-apex.rule=Host(`easydigitalagency.it`)
+      - traefik.http.routers.easydigital-apex.entrypoints=web
+      - traefik.http.routers.easydigital-apex.middlewares=easydigital-https-redirect
+
+      - traefik.http.routers.easydigital-apex-secure.rule=Host(`easydigitalagency.it`)
+      - traefik.http.routers.easydigital-apex-secure.entrypoints=websecure
+      - traefik.http.routers.easydigital-apex-secure.tls.certresolver=myresolver
+      - traefik.http.routers.easydigital-apex-secure.middlewares=easydigital-apex-to-www,easydigital-sec-headers
+      - traefik.http.middlewares.easydigital-apex-to-www.redirectregex.regex=^https://easydigitalagency\\.it/(.*)
+      - traefik.http.middlewares.easydigital-apex-to-www.redirectregex.replacement=https://www.easydigitalagency.it/$${1}
+      - traefik.http.middlewares.easydigital-apex-to-www.redirectregex.permanent=true
+
     networks:
       - wp_internal
       - gruppo_proxy
@@ -87,10 +102,11 @@ services:
       MAIL_USERNAME: ${SMTP_USER}
       MAIL_PASSWORD: ${SMTP_PASS}
       MAIL_DEFAULT_SENDER: ${SMTP_FROM}
-      MAIL_USE_TLS: "true"
+      MAIL_USE_TLS: "false"
+      MAIL_USE_SSL: "true"
     labels:
       - traefik.enable=true
-      - traefik.http.routers.easydigital-manager.rule=Host(`${WP_DOMAIN}`) && ((PathPrefix(`/gestionale`) && !PathPrefix(`/gestionale-2`)) || PathPrefix(`/registrazione`) || Path(`/logout`))
+      - traefik.http.routers.easydigital-manager.rule=Host(`${WP_DOMAIN}`) && ((PathPrefix(`/gestionale`) && !PathPrefix(`/gestionale-2`)) || PathPrefix(`/registrazione`) || PathPrefix(`/areapersonale`) || Path(`/logout`))
       - traefik.http.routers.easydigital-manager.entrypoints=websecure
       - traefik.http.routers.easydigital-manager.tls.certresolver=myresolver
       - traefik.http.routers.easydigital-manager.priority=200
