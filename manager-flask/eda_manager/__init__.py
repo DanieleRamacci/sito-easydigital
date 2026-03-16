@@ -13,7 +13,7 @@ def create_app(config_object=Config):
         __name__,
         template_folder="../templates",
         static_folder="../static",
-        static_url_path="/static",
+        static_url_path="/gestionale/static",
     )
     app.config.from_object(config_object)
     app.config["JSON_STORE_DIR"].mkdir(parents=True, exist_ok=True)
