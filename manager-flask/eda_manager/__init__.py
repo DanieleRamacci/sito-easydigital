@@ -46,9 +46,21 @@ def create_app(config_object=Config):
             except Exception as e:
                 click.echo(f"Nota: {e}")
 
-            # Create new tables (AdminUser, Notification) if they don't exist
+            # Add new columns to existing tables if missing
+            migrations = [
+                "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS payment_status VARCHAR DEFAULT 'pending'",
+                "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS description TEXT",
+            ]
+            for sql in migrations:
+                try:
+                    conn.execute(db.text(sql))
+                    conn.commit()
+                except Exception as e:
+                    click.echo(f"Migrazione saltata ({e})")
+
+            # Create new tables if they don't exist
             db.create_all()
-            click.echo("Nuove tabelle create (admin_users, notifications).")
+            click.echo("Schema aggiornato.")
 
     @app.cli.command("sync-debts")
     def sync_debts_command():
