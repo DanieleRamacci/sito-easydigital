@@ -690,13 +690,20 @@ def customer_new_submit():
         )
     try:
         customer = create_customer(request.form)
-    except Exception:
+    except Exception as exc:
         db.session.rollback()
+        import traceback
+        traceback.print_exc()
+        from sqlalchemy.exc import IntegrityError
+        if isinstance(exc, IntegrityError) and "unique" in str(exc).lower():
+            error_msg = "Email già presente nel sistema."
+        else:
+            error_msg = f"Errore: {type(exc).__name__}: {exc}"
         return render_template(
             "customer_form.html",
             title=current_app.config["APP_TITLE"],
             customer=None,
-            error="Email già presente nel sistema.",
+            error=error_msg,
         )
     return redirect(f"/gestionale/clienti/{customer.id}")
 

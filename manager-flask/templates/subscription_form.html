@@ -43,13 +43,13 @@
 
       <div class="form-group">
         <label>Tipo fatturazione *</label>
-        <select name="billing_type" id="billing-type">
+        <select name="billing_type" id="billing-type" onchange="toggleInterval()">
           <option value="subscription" {% if not sub or sub.billing_type == 'subscription' %}selected{% endif %}>Abbonamento ricorrente</option>
           <option value="one_time" {% if sub and sub.billing_type == 'one_time' %}selected{% endif %}>Una tantum</option>
         </select>
       </div>
 
-      <div class="form-group">
+      <div class="form-group" id="interval-group" {% if sub and sub.billing_type == 'one_time' %}style="display:none"{% endif %}>
         <label>Ricorrenza</label>
         <select name="billing_interval">
           <option value="annual" {% if not sub or sub.billing_interval == 'annual' %}selected{% endif %}>Annuale</option>
@@ -110,16 +110,18 @@
 </div>
 
 <script>
+function toggleInterval() {
+  const bt = document.getElementById('billing-type').value;
+  document.getElementById('interval-group').style.display = bt === 'one_time' ? 'none' : '';
+}
 function fillPrice() {
   const sel = document.getElementById('service-select');
   const opt = sel.selectedOptions[0];
   if (!opt || !opt.value) return;
   const priceField = document.getElementById('price-field');
-  if (!priceField.value) {
-    priceField.value = opt.dataset.price || '';
-  }
+  if (!priceField.value) priceField.value = opt.dataset.price || '';
   const btSel = document.getElementById('billing-type');
-  if (opt.dataset.type) btSel.value = opt.dataset.type;
+  if (opt.dataset.type) { btSel.value = opt.dataset.type; toggleInterval(); }
 }
 </script>
 {% endblock %}

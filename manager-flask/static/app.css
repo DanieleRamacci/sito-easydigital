@@ -201,3 +201,12 @@ textarea { resize: vertical }
   .pipeline-label { font-size: .7rem; max-width: 60px }
   .header-actions { flex-wrap: wrap }
 }
+
+.form-control-static {
+  padding: 8px 11px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #f3f4f6;
+  color: #374151;
+  font-size: .93rem;
+}

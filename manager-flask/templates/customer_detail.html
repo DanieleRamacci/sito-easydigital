@@ -49,7 +49,7 @@
   <a class="tab-link" href="#sec-abbonamenti" onclick="showTab(event,'sec-abbonamenti')">Abbonamenti</a>
   <a class="tab-link" href="#sec-debiti" onclick="showTab(event,'sec-debiti')">Debiti aperti</a>
   <a class="tab-link" href="#sec-versamenti" onclick="showTab(event,'sec-versamenti')">Storico versamenti</a>
-  <a class="tab-link" href="#sec-note" onclick="showTab(event,'sec-note')">Note ({{ customer.notes.count() }})</a>
+  <a class="tab-link" href="#sec-note" onclick="showTab(event,'sec-note')">Note ({{ note_list|length }})</a>
   <a class="tab-link" href="#sec-modifica" onclick="showTab(event,'sec-modifica')">Modifica anagrafica</a>
 </div>
 
@@ -250,7 +250,6 @@
     <button type="submit" class="btn btn-sm">Salva nota</button>
   </form>
 
-  {% set note_list = customer.notes.order_by('created_at desc').all() %}
   {% if note_list %}
   <div style="display:flex;flex-direction:column;gap:10px;">
     {% for note in note_list %}

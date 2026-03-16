@@ -44,7 +44,7 @@ class TicketStatus(str, Enum):
 class Service(TimestampMixin, db.Model):
     __tablename__ = "services"
 
-    id = db.Column(db.BigInteger, primary_key=True)
+    id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.Text, nullable=False)
     description = db.Column(db.Text, default="")
     price = db.Column(db.Numeric(12, 2), default=0, nullable=False)
@@ -66,7 +66,7 @@ class Service(TimestampMixin, db.Model):
 class Customer(TimestampMixin, db.Model):
     __tablename__ = "customers"
 
-    id = db.Column(db.BigInteger, primary_key=True)
+    id = db.Column(db.Integer, primary_key=True)
     company = db.Column(db.Text, nullable=False)
     website = db.Column(db.Text, default="")
     vat = db.Column(db.Text, default="")
@@ -92,7 +92,7 @@ class Customer(TimestampMixin, db.Model):
 class Invite(db.Model):
     __tablename__ = "invites"
 
-    id = db.Column(db.BigInteger, primary_key=True)
+    id = db.Column(db.Integer, primary_key=True)
     customer_id = db.Column(db.BigInteger, db.ForeignKey("customers.id", ondelete="CASCADE"), nullable=False)
     token = db.Column(db.Text, unique=True, nullable=False)
     status = db.Column(db.String(32), default="pending", nullable=False)
@@ -104,7 +104,7 @@ class Invite(db.Model):
 class Job(TimestampMixin, db.Model):
     __tablename__ = "jobs"
 
-    id = db.Column(db.BigInteger, primary_key=True)
+    id = db.Column(db.Integer, primary_key=True)
     customer_id = db.Column(db.BigInteger, db.ForeignKey("customers.id", ondelete="CASCADE"), nullable=False)
     title = db.Column(db.Text, nullable=False)
     notes = db.Column(db.Text, default="")
@@ -126,7 +126,7 @@ class Job(TimestampMixin, db.Model):
 class Subscription(TimestampMixin, db.Model):
     __tablename__ = "subscriptions"
 
-    id = db.Column(db.BigInteger, primary_key=True)
+    id = db.Column(db.Integer, primary_key=True)
     customer_id = db.Column(db.BigInteger, db.ForeignKey("customers.id", ondelete="CASCADE"), nullable=False, index=True)
     job_id = db.Column(db.BigInteger, db.ForeignKey("jobs.id", ondelete="SET NULL"), index=True)
     service_id = db.Column(db.BigInteger, db.ForeignKey("services.id"), nullable=False)
@@ -162,7 +162,7 @@ class Subscription(TimestampMixin, db.Model):
 class Ticket(TimestampMixin, db.Model):
     __tablename__ = "tickets"
 
-    id = db.Column(db.BigInteger, primary_key=True)
+    id = db.Column(db.Integer, primary_key=True)
     customer_id = db.Column(db.BigInteger, db.ForeignKey("customers.id", ondelete="SET NULL"))
     subject = db.Column(db.Text, nullable=False)
     message = db.Column(db.Text, nullable=False)
@@ -176,7 +176,7 @@ class Ticket(TimestampMixin, db.Model):
 class DebtItem(TimestampMixin, db.Model):
     __tablename__ = "debt_items"
 
-    id = db.Column(db.BigInteger, primary_key=True)
+    id = db.Column(db.Integer, primary_key=True)
     customer_id = db.Column(db.BigInteger, db.ForeignKey("customers.id", ondelete="CASCADE"), nullable=False)
     source_type = db.Column(db.String(32), default="job", nullable=False)
     source_id = db.Column(db.BigInteger)
@@ -207,7 +207,7 @@ class DebtItem(TimestampMixin, db.Model):
 class PaymentEntry(db.Model):
     __tablename__ = "payment_entries"
 
-    id = db.Column(db.BigInteger, primary_key=True)
+    id = db.Column(db.Integer, primary_key=True)
     debt_item_id = db.Column(db.BigInteger, db.ForeignKey("debt_items.id", ondelete="CASCADE"), nullable=False, index=True)
     customer_id = db.Column(db.BigInteger, db.ForeignKey("customers.id", ondelete="SET NULL"))
     date = db.Column(db.Date, nullable=False)
@@ -222,7 +222,7 @@ class PaymentEntry(db.Model):
 class CustomerContact(TimestampMixin, db.Model):
     __tablename__ = "customer_contacts"
 
-    id = db.Column(db.BigInteger, primary_key=True)
+    id = db.Column(db.Integer, primary_key=True)
     customer_id = db.Column(db.BigInteger, db.ForeignKey("customers.id", ondelete="CASCADE"), nullable=False)
     name = db.Column(db.Text, nullable=False)
     email = db.Column(db.Text)
@@ -231,7 +231,7 @@ class CustomerContact(TimestampMixin, db.Model):
 class CustomerNote(db.Model):
     __tablename__ = "customer_notes"
 
-    id = db.Column(db.BigInteger, primary_key=True)
+    id = db.Column(db.Integer, primary_key=True)
     customer_id = db.Column(db.BigInteger, db.ForeignKey("customers.id", ondelete="CASCADE"), nullable=False, index=True)
     text = db.Column(db.Text, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
@@ -240,7 +240,7 @@ class CustomerNote(db.Model):
 class JobNote(db.Model):
     __tablename__ = "job_notes"
 
-    id = db.Column(db.BigInteger, primary_key=True)
+    id = db.Column(db.Integer, primary_key=True)
     job_id = db.Column(db.BigInteger, db.ForeignKey("jobs.id", ondelete="CASCADE"), nullable=False, index=True)
     text = db.Column(db.Text, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
@@ -250,7 +250,7 @@ class JobNote(db.Model):
 class ServicePriceHistory(db.Model):
     __tablename__ = "service_price_history"
 
-    id = db.Column(db.BigInteger, primary_key=True)
+    id = db.Column(db.Integer, primary_key=True)
     service_id = db.Column(db.BigInteger, db.ForeignKey("services.id", ondelete="CASCADE"), nullable=False)
     old_price = db.Column(db.Numeric(12, 2), nullable=False)
     new_price = db.Column(db.Numeric(12, 2), nullable=False)
@@ -262,7 +262,7 @@ class ServicePriceHistory(db.Model):
 class AuditLog(db.Model):
     __tablename__ = "audit_log"
 
-    id = db.Column(db.BigInteger, primary_key=True)
+    id = db.Column(db.Integer, primary_key=True)
     actor_user_id = db.Column(db.BigInteger)
     action = db.Column(db.Text, nullable=False)
     entity_type = db.Column(db.Text, nullable=False)
@@ -275,7 +275,7 @@ class AuditLog(db.Model):
 class JobService(db.Model):
     __tablename__ = "job_services"
 
-    id = db.Column(db.BigInteger, primary_key=True)
+    id = db.Column(db.Integer, primary_key=True)
     job_id = db.Column(db.BigInteger, db.ForeignKey("jobs.id", ondelete="CASCADE"), nullable=False)
     service_id = db.Column(db.BigInteger, db.ForeignKey("services.id"), nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
@@ -285,7 +285,7 @@ class JobService(db.Model):
 class AdminUser(db.Model):
     __tablename__ = "admin_users"
 
-    id = db.Column(db.BigInteger, primary_key=True)
+    id = db.Column(db.Integer, primary_key=True)
     email = db.Column(db.Text, nullable=False, unique=True)
     password_hash = db.Column(db.Text, nullable=False)
     name = db.Column(db.Text, default="")
@@ -295,7 +295,7 @@ class AdminUser(db.Model):
 class Notification(db.Model):
     __tablename__ = "notifications"
 
-    id = db.Column(db.BigInteger, primary_key=True)
+    id = db.Column(db.Integer, primary_key=True)
     title = db.Column(db.Text, nullable=False)
     message = db.Column(db.Text, default="")
     notif_type = db.Column(db.String(32), default="info", nullable=False)  # info, warning, danger

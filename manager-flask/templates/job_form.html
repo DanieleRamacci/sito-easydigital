@@ -22,17 +22,21 @@
         </div>
         <div class="form-group">
           <label>Cliente *</label>
+          {% if preselect_customer %}
+            {% for c in customers %}{% if c.id|string == preselect_customer|string %}
+            <input type="hidden" name="customer_id" value="{{ c.id }}" />
+            <div class="form-control-static">{{ c.company or ((c.first_name or '') ~ ' ' ~ (c.last_name or '')) }}</div>
+            {% endif %}{% endfor %}
+          {% else %}
           <select name="customer_id" required>
             <option value="">— Seleziona cliente —</option>
             {% for c in customers %}
-            <option value="{{ c.id }}"
-              {% if job and job.customer_id == c.id %}selected
-              {% elif preselect_customer and preselect_customer|int == c.id %}selected
-              {% endif %}>
+            <option value="{{ c.id }}" {% if job and job.customer_id == c.id %}selected{% endif %}>
               {{ c.company or ((c.first_name or '') ~ ' ' ~ (c.last_name or '')) }} — {{ c.email }}
             </option>
             {% endfor %}
           </select>
+          {% endif %}
         </div>
         <div class="form-group">
           <label>Stato</label>
@@ -102,7 +106,7 @@
 
 <script>
 (function () {
-  const servicesData = {{ services | tojson }};
+  const servicesData = [{% for s in services %}{"id":{{ s.id }},"name":{{ s.name|tojson }},"price":{{ s.price|float }}}{% if not loop.last %},{% endif %}{% endfor %}];
   const picker = document.getElementById('servicePicker');
   const addBtn = document.getElementById('serviceAddBtn');
   const listEl = document.getElementById('serviceList');
@@ -130,7 +134,7 @@
       const s = servicesData.find(x => x.id === id);
       return sum + (s ? Number(s.price || 0) : 0);
     }, 0);
-    if (total > 0) amountInput.value = total.toFixed(2);
+    amountInput.value = total.toFixed(2);
 
     listEl.querySelectorAll('button[data-id]').forEach(btn => {
       btn.addEventListener('click', () => {

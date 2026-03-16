@@ -429,6 +429,8 @@ def customer_detail_data(customer_id: int) -> Optional[dict[str, Any]]:
         for pe, di in payment_history
     ]
 
+    note_list = customer.notes.order_by(CustomerNote.created_at.desc()).all()
+
     return {
         "customer": customer,
         "active_jobs": active_jobs,
@@ -439,6 +441,7 @@ def customer_detail_data(customer_id: int) -> Optional[dict[str, Any]]:
         "paid_debts": paid_debts_raw,
         "total_outstanding": total_outstanding,
         "payment_history": payment_rows,
+        "note_list": note_list,
     }
 
 
