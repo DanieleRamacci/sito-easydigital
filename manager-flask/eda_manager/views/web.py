@@ -88,6 +88,35 @@ def health():
     return {"ok": True, "app": "eda-manager-flask"}
 
 
+@bp.get("/dev-login")
+def dev_login():
+    """Dev-only: generate a local JWT and set the session cookie (DEV_MODE=true required)."""
+    if not current_app.config.get("DEV_MODE"):
+        return "Not available", 404
+    import time
+    role = request.args.get("role", "administrator")
+    payload = {
+        "sub": "1",
+        "email": "dev@local.test",
+        "roles": [role],
+        "iat": int(time.time()),
+        "exp": int(time.time()) + 8 * 3600,
+    }
+    token = jwt.encode(payload, current_app.config["EDA_SSO_SECRET"], algorithm="HS256")
+    next_path = "/gestionale" if role == "administrator" else "/areapersonale"
+    resp = make_response(redirect(next_path))
+    resp.set_cookie(
+        current_app.config["SESSION_COOKIE"],
+        token,
+        httponly=True,
+        secure=False,
+        samesite="Lax",
+        path="/",
+        max_age=8 * 3600,
+    )
+    return resp
+
+
 @bp.get("/")
 def home():
     return render_template("home.html", title=current_app.config["APP_TITLE"])

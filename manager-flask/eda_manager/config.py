@@ -48,6 +48,9 @@ class Config:
     MAIL_DEFAULT_SENDER = os.getenv("MAIL_DEFAULT_SENDER", os.getenv("MAIL_USERNAME", ""))
     MAIL_SUPPRESS_SEND = os.getenv("MAIL_SUPPRESS_SEND", "false").lower() == "true"
 
+    # Dev
+    DEV_MODE = os.getenv("DEV_MODE", "false").lower() == "true"
+
     # App
     APP_TITLE = "EDA Manager"
     APP_BASE_URL = (os.getenv("APP_BASE_URL", "http://localhost:5051") or "").rstrip("/")
