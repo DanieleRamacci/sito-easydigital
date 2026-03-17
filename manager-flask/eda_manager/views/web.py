@@ -1179,9 +1179,7 @@ def fic_genera_preventivo(job_id: int):
     if not fic_enabled():
         return redirect(f"/gestionale/lavori/{job_id}")
 
-    vat_id, err = get_vat_type_22()
-    if err:
-        return redirect(f"/gestionale/lavori/{job_id}?fic_error={err}")
+    vat_id, _ = get_vat_type_22()  # 0 = not found, fallback to value-only in fic.py
 
     doc, err = create_quote_from_job(job, vat_id)
     if err:

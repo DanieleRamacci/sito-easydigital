@@ -22,6 +22,12 @@
   </div>
 </div>
 
+{% if fic_doc_error %}
+<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:12px 18px;font-size:.88rem;color:#991b1b;margin-bottom:14px;">
+  <strong>Errore FIC:</strong> {{ fic_doc_error }}
+</div>
+{% endif %}
+
 <!-- Pipeline visuale -->
 <div class="pipeline card">
   {% set stages = [

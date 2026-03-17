@@ -87,28 +87,37 @@ def fetch_all_clients(max_pages: int = 10) -> tuple[list[dict], str]:
 
 def get_vat_type_22() -> tuple[int, str]:
     """Return the FIC vat_type id for 22% IVA ordinaria. Cached per company.
-    Uses /issued_documents/info which returns all available VAT types.
+    Tries multiple endpoints for compatibility.
     """
     cid = _cid()
     if cid in _vat_22_cache:
         return _vat_22_cache[cid], ""
-    try:
-        resp = requests.get(
-            f"{FIC_BASE}/c/{cid}/issued_documents/info",
-            params={"document_type": "quote"},
-            headers=_headers(),
-            timeout=8,
-        )
-        if not resp.ok:
-            return 0, f"Errore nel recupero aliquote IVA ({resp.status_code})"
-        vat_types = resp.json().get("data", {}).get("vat_types", {}).get("data", [])
-        for vt in vat_types:
-            if vt.get("value") == 22 and not vt.get("is_disabled"):
-                _vat_22_cache[cid] = vt["id"]
-                return vt["id"], ""
-        return 0, "Aliquota IVA 22% non trovata in FattureInCloud."
-    except Exception as exc:
-        return 0, f"Errore di rete: {exc}"
+
+    # Try multiple endpoint/param combinations for robustness
+    attempts = [
+        (f"{FIC_BASE}/c/{cid}/issued_documents/info", {"type": "quote"}),
+        (f"{FIC_BASE}/c/{cid}/issued_documents/info", {"document_type": "quote"}),
+    ]
+    for url, params in attempts:
+        try:
+            resp = requests.get(url, params=params, headers=_headers(), timeout=8)
+            if not resp.ok:
+                continue
+            data = resp.json().get("data", {})
+            # Response may nest vat_types under different keys
+            vat_list = (
+                data.get("vat_types", {}).get("data", [])
+                or data.get("vat_types", [])
+            )
+            for vt in vat_list:
+                if vt.get("value") == 22 and not vt.get("is_disabled"):
+                    _vat_22_cache[cid] = vt["id"]
+                    return vt["id"], ""
+        except Exception:
+            continue
+
+    # Could not find via info endpoint — return sentinel 0 so caller uses value-only fallback
+    return 0, ""
 
 
 # ---------------------------------------------------------------------------
@@ -180,7 +189,7 @@ def get_document(fic_document_id: int) -> tuple[dict, str]:
         return {}, f"Errore di rete: {exc}"
 
 
-def create_quote_from_job(job, vat_id: int) -> tuple[dict, str]:
+def create_quote_from_job(job, vat_id: int = 0) -> tuple[dict, str]:
     """Create a FIC quote (preventivo) from a Job.
     Returns (doc_data, error_message).
     """
@@ -200,6 +209,9 @@ def create_quote_from_job(job, vat_id: int) -> tuple[dict, str]:
     else:
         entity = {"name": job.title}
 
+    # Build VAT object: use id if available, otherwise fall back to value-only
+    vat_obj = {"id": vat_id} if vat_id else {"value": 22}
+
     # Build line items from job services, fallback to job amount
     items: list[dict] = []
     if job.services:
@@ -208,14 +220,14 @@ def create_quote_from_job(job, vat_id: int) -> tuple[dict, str]:
                 "name": svc.name,
                 "net_price": float(svc.price or 0),
                 "qty": 1,
-                "vat": {"id": vat_id},
+                "vat": vat_obj,
             })
     else:
         items.append({
             "name": job.title,
             "net_price": float(job.amount or 0),
             "qty": 1,
-            "vat": {"id": vat_id},
+            "vat": vat_obj,
         })
 
     payload = {
