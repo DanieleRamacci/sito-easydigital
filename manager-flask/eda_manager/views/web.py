@@ -1088,7 +1088,8 @@ def fic_importa_clienti_page():
     """Page to import / link FIC clients to EDA customers."""
     from ..services.fic import fic_enabled, fetch_all_clients
     if not fic_enabled():
-        return redirect("/gestionale")
+        return render_template("fic_importa_clienti.html", rows=[],
+                               error="FattureInCloud non configurato: aggiungi FIC_BEARER_TOKEN e FIC_COMPANY_ID nelle variabili d'ambiente e rideploya il container.")
 
     fic_clients, error = fetch_all_clients()
 
