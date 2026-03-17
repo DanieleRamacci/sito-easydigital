@@ -1,0 +1,35 @@
+{% if error %}
+<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:12px 16px;font-size:.88rem;color:#991b1b;margin-top:6px;">
+  {{ error }}
+</div>
+
+{% elif results %}
+<p style="font-size:.83rem;color:#6b7280;margin:0 0 8px;">
+  {{ results|length }} risultat{{ 'o' if results|length == 1 else 'i' }} per "<em>{{ query }}</em>"
+</p>
+<table class="tbl" style="margin-bottom:0;">
+  <thead>
+    <tr><th>Ragione sociale / Nome</th><th>P.IVA</th><th>Città</th><th></th></tr>
+  </thead>
+  <tbody>
+    {% for r in results %}
+    <tr>
+      <td>{{ r.get('name', '—') }}</td>
+      <td style="color:#6b7280;font-size:.85rem;">{{ r.get('vat_number') or r.get('tax_code') or '—' }}</td>
+      <td style="color:#6b7280;font-size:.85rem;">{{ r.get('address_city') or '—' }}</td>
+      <td>
+        <form method="POST" action="/gestionale/clienti/{{ customer.id }}/fic-collega">
+          <input type="hidden" name="fic_entity_id" value="{{ r.id }}" />
+          <button type="submit" class="btn-xs">Collega</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+{% else %}
+<p style="font-size:.88rem;color:#6b7280;margin:6px 0 0;">
+  Nessun cliente trovato per "<em>{{ query }}</em>" in FattureInCloud.
+</p>
+{% endif %}

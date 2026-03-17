@@ -1068,6 +1068,70 @@ def service_price_update(service_id: int):
 
 
 # ---------------------------------------------------------------------------
+# FattureInCloud integration
+# ---------------------------------------------------------------------------
+
+@bp.get("/gestionale/clienti/<int:customer_id>/fic-fatture")
+@require_admin
+def fic_fatture(customer_id: int):
+    """HTMX: load unpaid FIC invoices/proforma for a customer (lazy)."""
+    from ..services.fic import fic_enabled, get_unpaid_documents
+    customer = Customer.query.get_or_404(customer_id)
+
+    if not fic_enabled():
+        return render_template("partials/fic_invoices.html",
+                               customer=customer, docs=[], error=None, not_configured=True)
+
+    if not customer.fic_entity_id:
+        return render_template("partials/fic_invoices.html",
+                               customer=customer, docs=[], error=None, not_linked=True)
+
+    docs, error = get_unpaid_documents(customer.fic_entity_id)
+    return render_template("partials/fic_invoices.html",
+                           customer=customer, docs=docs, error=error,
+                           not_configured=False, not_linked=False)
+
+
+@bp.post("/gestionale/clienti/<int:customer_id>/fic-cerca")
+@require_admin
+def fic_cerca(customer_id: int):
+    """HTMX: search FIC clients and return result rows."""
+    from ..services.fic import fic_enabled, search_clients
+    customer = Customer.query.get_or_404(customer_id)
+    query = (request.form.get("q") or "").strip()
+    if not query:
+        query = customer.vat or customer.company or ""
+
+    results, error = search_clients(query) if fic_enabled() else ([], "FIC non configurato.")
+    return render_template("partials/fic_search_results.html",
+                           customer=customer, results=results, error=error, query=query)
+
+
+@bp.post("/gestionale/clienti/<int:customer_id>/fic-collega")
+@require_admin
+def fic_collega(customer_id: int):
+    """Link a FIC entity_id to this customer."""
+    customer = Customer.query.get_or_404(customer_id)
+    fic_id_raw = (request.form.get("fic_entity_id") or "").strip()
+    try:
+        customer.fic_entity_id = int(fic_id_raw)
+        db.session.commit()
+    except (ValueError, TypeError):
+        pass
+    return redirect(f"/gestionale/clienti/{customer_id}#sec-fic")
+
+
+@bp.post("/gestionale/clienti/<int:customer_id>/fic-scollega")
+@require_admin
+def fic_scollega(customer_id: int):
+    """Unlink FIC entity from this customer."""
+    customer = Customer.query.get_or_404(customer_id)
+    customer.fic_entity_id = None
+    db.session.commit()
+    return redirect(f"/gestionale/clienti/{customer_id}#sec-fic")
+
+
+# ---------------------------------------------------------------------------
 # Area personale — ticket
 # ---------------------------------------------------------------------------
 

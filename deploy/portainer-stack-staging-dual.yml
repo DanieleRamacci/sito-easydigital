@@ -104,6 +104,8 @@ services:
       MAIL_DEFAULT_SENDER: ${SMTP_FROM}
       MAIL_USE_TLS: "true"
       MAIL_USE_SSL: "false"
+      FIC_BEARER_TOKEN: ${FIC_BEARER_TOKEN}
+      FIC_COMPANY_ID: ${FIC_COMPANY_ID}
     labels:
       - traefik.enable=true
       - traefik.http.routers.easydigital-manager.rule=Host(`${WP_DOMAIN}`) && ((PathPrefix(`/gestionale`) && !PathPrefix(`/gestionale-2`)) || PathPrefix(`/registrazione`) || PathPrefix(`/areapersonale`) || Path(`/logout`))

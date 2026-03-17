@@ -56,3 +56,7 @@ class Config:
     # App
     APP_TITLE = "EDA Manager"
     APP_BASE_URL = (os.getenv("APP_BASE_URL", "http://localhost:5051") or "").rstrip("/")
+
+    # FattureInCloud integration
+    FIC_BEARER_TOKEN = os.getenv("FIC_BEARER_TOKEN", "")
+    FIC_COMPANY_ID = os.getenv("FIC_COMPANY_ID", "")

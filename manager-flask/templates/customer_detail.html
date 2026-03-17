@@ -55,6 +55,7 @@
   <a class="tab-link" href="#sec-debiti" onclick="showTab(event,'sec-debiti')">Debiti aperti</a>
   <a class="tab-link" href="#sec-versamenti" onclick="showTab(event,'sec-versamenti')">Storico versamenti</a>
   <a class="tab-link" href="#sec-note" onclick="showTab(event,'sec-note')">Note ({{ note_list|length }})</a>
+  <a class="tab-link" href="#sec-fic" onclick="showTab(event,'sec-fic')">Fatture FIC</a>
   <a class="tab-link" href="#sec-modifica" onclick="showTab(event,'sec-modifica')">Modifica anagrafica</a>
 </div>
 
@@ -345,6 +346,32 @@
   {% else %}
   <p class="muted">Nessuna nota inserita.</p>
   {% endif %}
+</section>
+
+<!-- Fatture FIC -->
+<section id="sec-fic" class="card tab-section">
+  <div class="section-header">
+    <h2>Fatture FIC — da pagare</h2>
+    {% if customer.fic_entity_id %}
+    <form method="POST" action="/gestionale/clienti/{{ customer.id }}/fic-scollega"
+      onsubmit="return confirm('Scollegare questo cliente da FattureInCloud?')" style="display:inline;">
+      <button type="submit" class="btn btn-sm btn-outline" style="color:#dc2626;border-color:#dc2626;">Scollega FIC</button>
+    </form>
+    {% endif %}
+  </div>
+
+  {% if customer.fic_entity_id %}
+  <p style="font-size:.83rem;color:#6b7280;margin:0 0 12px;">
+    Cliente FIC collegato — ID <strong>{{ customer.fic_entity_id }}</strong>
+  </p>
+  {% endif %}
+
+  <div id="fic-content"
+    hx-get="/gestionale/clienti/{{ customer.id }}/fic-fatture"
+    hx-trigger="revealed"
+    hx-swap="innerHTML">
+    <p class="muted" style="font-size:.88rem;">Caricamento fatture…</p>
+  </div>
 </section>
 
 <!-- Modifica anagrafica -->

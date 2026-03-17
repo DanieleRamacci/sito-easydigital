@@ -79,6 +79,7 @@ class Customer(TimestampMixin, db.Model):
     sdi = db.Column(db.Text, default="")
     status = db.Column(db.String(32), default="lead", nullable=False)
     wp_user_id = db.Column(db.BigInteger)
+    fic_entity_id = db.Column(db.BigInteger)
 
     jobs = db.relationship("Job", backref="customer", lazy="dynamic", cascade="all, delete-orphan")
     subscriptions = db.relationship("Subscription", backref="customer", lazy="dynamic", cascade="all, delete-orphan")
