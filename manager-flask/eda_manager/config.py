@@ -38,14 +38,16 @@ class Config:
     JSON_STORE_DIR = Path(os.getenv("DATA_DIR", str(BASE_DIR / "data")))
     JSON_STORE_FILE = JSON_STORE_DIR / "store.json"
 
-    # Email (Flask-Mail)
-    MAIL_SERVER = os.getenv("MAIL_SERVER", "smtp.gmail.com")
-    MAIL_PORT = int(os.getenv("MAIL_PORT", "587"))
-    MAIL_USE_TLS = os.getenv("MAIL_USE_TLS", "true").lower() == "true"
-    MAIL_USE_SSL = os.getenv("MAIL_USE_SSL", "false").lower() == "true"
-    MAIL_USERNAME = os.getenv("MAIL_USERNAME", "")
-    MAIL_PASSWORD = os.getenv("MAIL_PASSWORD", "")
-    MAIL_DEFAULT_SENDER = os.getenv("MAIL_DEFAULT_SENDER", os.getenv("MAIL_USERNAME", ""))
+    # Email (Flask-Mail) — supports both SMTP_* (production) and MAIL_* (legacy/dev) env vars
+    MAIL_SERVER = os.getenv("SMTP_HOST") or os.getenv("MAIL_SERVER", "smtp.gmail.com")
+    _mail_port = int(os.getenv("SMTP_PORT") or os.getenv("MAIL_PORT", "587"))
+    MAIL_PORT = _mail_port
+    # Port 465 = implicit SSL; 587/25 = STARTTLS
+    MAIL_USE_SSL = _mail_port == 465 or os.getenv("MAIL_USE_SSL", "false").lower() == "true"
+    MAIL_USE_TLS = (not MAIL_USE_SSL) and os.getenv("MAIL_USE_TLS", "true").lower() == "true"
+    MAIL_USERNAME = os.getenv("SMTP_USER") or os.getenv("MAIL_USERNAME", "")
+    MAIL_PASSWORD = os.getenv("SMTP_PASS") or os.getenv("MAIL_PASSWORD", "")
+    MAIL_DEFAULT_SENDER = os.getenv("SMTP_FROM") or os.getenv("MAIL_DEFAULT_SENDER") or MAIL_USERNAME
     MAIL_SUPPRESS_SEND = os.getenv("MAIL_SUPPRESS_SEND", "false").lower() == "true"
 
     # Dev

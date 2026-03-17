@@ -545,7 +545,7 @@ def renewal_notify(sub_id: int):
         sender = (
             current_app.config.get("MAIL_DEFAULT_SENDER")
             or current_app.config.get("MAIL_USERNAME")
-            or "noreply@easydigital.it"
+            or "noreply@easydigitalagency.it"
         )
         msg = Message(
             subject=subject,
