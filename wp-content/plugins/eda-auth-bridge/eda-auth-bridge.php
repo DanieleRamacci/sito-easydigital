@@ -13,6 +13,174 @@ if (!defined('ABSPATH')) {
 final class EDA_Auth_Bridge {
     public static function init() {
         add_action('rest_api_init', [__CLASS__, 'register_routes']);
+        add_action('login_enqueue_scripts', [__CLASS__, 'login_styles']);
+        add_filter('login_headerurl',  [__CLASS__, 'login_logo_url']);
+        add_filter('login_headertext', [__CLASS__, 'login_logo_text']);
+        add_filter('login_headertitle', [__CLASS__, 'login_logo_text']); // WP < 5.2 compat
+    }
+
+    /* ------------------------------------------------------------------
+     * WordPress login page customization
+     * ------------------------------------------------------------------ */
+
+    public static function login_styles() {
+        ?>
+        <style>
+        /* ── Sfondo e layout ───────────────────────────────────────────── */
+        body.login {
+            background: #f5f8f6;
+            font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+        }
+        body.login #login {
+            padding: 8vh 0 40px;
+            width: 360px;
+        }
+
+        /* ── Logo / brand ───────────────────────────────────────────────── */
+        body.login h1 a {
+            background-image: none !important;
+            background-size: 0 !important;
+            width: auto !important;
+            height: auto !important;
+            text-indent: 0 !important;
+            overflow: visible !important;
+            display: block;
+            text-align: center;
+            font-size: 1.45rem;
+            font-weight: 800;
+            color: #14532d !important;
+            letter-spacing: -.02em;
+            line-height: 1.2;
+            padding: 0 0 6px;
+            text-shadow: none;
+            box-shadow: none;
+        }
+        body.login h1 a::before {
+            content: "Easy Digital";
+            display: block;
+            font-size: 1.45rem;
+            font-weight: 800;
+            color: #14532d;
+        }
+        body.login h1 a::after {
+            content: "Agency";
+            display: block;
+            font-size: .95rem;
+            font-weight: 500;
+            color: #1f8a4c;
+            letter-spacing: .04em;
+            text-transform: uppercase;
+        }
+
+        /* ── Card ───────────────────────────────────────────────────────── */
+        body.login #loginform,
+        body.login #lostpasswordform,
+        body.login #resetpassform {
+            background: #fff;
+            border: 1px solid #dce6df;
+            border-radius: 14px;
+            box-shadow: 0 4px 24px rgba(0,0,0,.06);
+            padding: 28px 28px 22px;
+            margin-top: 16px;
+        }
+
+        /* ── Campi input ────────────────────────────────────────────────── */
+        body.login input[type="text"],
+        body.login input[type="password"],
+        body.login input[type="email"] {
+            border: 1px solid #dce6df;
+            border-radius: 8px;
+            box-shadow: none;
+            font-size: .95rem;
+            padding: 9px 12px;
+            transition: border-color .15s;
+        }
+        body.login input[type="text"]:focus,
+        body.login input[type="password"]:focus,
+        body.login input[type="email"]:focus {
+            border-color: #1f8a4c;
+            box-shadow: 0 0 0 2px rgba(31,138,76,.15);
+            outline: none;
+        }
+
+        /* ── Pulsante submit ────────────────────────────────────────────── */
+        body.login .button-primary,
+        body.login input[type="submit"] {
+            background: #1f8a4c !important;
+            border: none !important;
+            border-radius: 8px !important;
+            box-shadow: none !important;
+            color: #fff !important;
+            font-size: .95rem !important;
+            font-weight: 600 !important;
+            letter-spacing: .01em;
+            padding: 10px 0 !important;
+            text-shadow: none !important;
+            transition: background .15s !important;
+            width: 100%;
+        }
+        body.login .button-primary:hover,
+        body.login input[type="submit"]:hover {
+            background: #14532d !important;
+        }
+
+        /* ── Messaggi errore / successo ─────────────────────────────────── */
+        body.login .message,
+        body.login .success {
+            border-left: 4px solid #1f8a4c;
+            border-radius: 6px;
+            background: #f0fdf4;
+            color: #14532d;
+        }
+        body.login .error,
+        body.login #login_error {
+            border-left: 4px solid #dc2626;
+            border-radius: 6px;
+            background: #fef2f2;
+            color: #991b1b;
+            box-shadow: none;
+        }
+
+        /* ── Link in basso ──────────────────────────────────────────────── */
+        body.login #nav,
+        body.login #backtoblog {
+            text-align: center;
+        }
+        body.login #nav a,
+        body.login #backtoblog a {
+            color: #6b7280 !important;
+            font-size: .82rem;
+        }
+        body.login #nav a:hover,
+        body.login #backtoblog a:hover {
+            color: #1f8a4c !important;
+        }
+        /* Nascondi "← Torna a [sito]" — l'utente non deve vedere il nome WP */
+        body.login #backtoblog {
+            display: none;
+        }
+
+        /* ── Labels ─────────────────────────────────────────────────────── */
+        body.login label {
+            color: #374151;
+            font-size: .88rem;
+            font-weight: 500;
+        }
+
+        /* ── Privacy policy notice ──────────────────────────────────────── */
+        body.login .privacy-policy-page-link {
+            display: none;
+        }
+        </style>
+        <?php
+    }
+
+    public static function login_logo_url() {
+        return home_url('/');
+    }
+
+    public static function login_logo_text() {
+        return 'Easy Digital Agency';
     }
 
     public static function register_routes() {

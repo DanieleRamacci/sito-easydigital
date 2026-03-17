@@ -102,8 +102,8 @@ services:
       MAIL_USERNAME: ${SMTP_USER}
       MAIL_PASSWORD: ${SMTP_PASS}
       MAIL_DEFAULT_SENDER: ${SMTP_FROM}
-      MAIL_USE_TLS: "false"
-      MAIL_USE_SSL: "true"
+      MAIL_USE_TLS: "true"
+      MAIL_USE_SSL: "false"
     labels:
       - traefik.enable=true
       - traefik.http.routers.easydigital-manager.rule=Host(`${WP_DOMAIN}`) && ((PathPrefix(`/gestionale`) && !PathPrefix(`/gestionale-2`)) || PathPrefix(`/registrazione`) || PathPrefix(`/areapersonale`) || Path(`/logout`))
