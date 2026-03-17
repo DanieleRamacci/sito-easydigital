@@ -212,3 +212,8 @@ textarea { resize: vertical }
 }
 
 .year-separator td { background: #f3f4f6; font-weight: 700; font-size: .8rem; color: #6b7280; letter-spacing: .05em; padding: 6px 8px; text-transform: uppercase; }
+
+/* Debt breakdown details/summary */
+details > summary { list-style: none; }
+details > summary::-webkit-details-marker { display: none; }
+details[open] .details-arrow { transform: rotate(90deg); display: inline-block; }

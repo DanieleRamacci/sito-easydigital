@@ -407,6 +407,20 @@ def customer_detail_data(customer_id: int) -> Optional[dict[str, Any]]:
     for d in open_debts_raw:
         outstanding = debt_outstanding(d.amount_total, d.amount_paid)
         total_outstanding += outstanding
+
+        # Build per-service breakdown for job debts
+        services_breakdown = []
+        if d.source_type == "job" and d.source_id:
+            job_obj = db.session.get(Job, d.source_id)
+            if job_obj:
+                for svc in job_obj.services:
+                    services_breakdown.append({
+                        "name": svc.name,
+                        "price": parse_decimal(svc.price),
+                        "billing_type": svc.billing_type,
+                        "billing_interval": svc.billing_interval,
+                    })
+
         open_debts.append({
             "debt_id": d.id,
             "label": d.label,
@@ -416,6 +430,7 @@ def customer_detail_data(customer_id: int) -> Optional[dict[str, Any]]:
             "amount_total": parse_decimal(d.amount_total),
             "amount_paid": parse_decimal(d.amount_paid),
             "outstanding": outstanding,
+            "services_breakdown": services_breakdown,
         })
 
     # Paid debts (historical)

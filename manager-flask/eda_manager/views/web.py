@@ -368,6 +368,82 @@ def debts_payment_new(debt_id: int):
     return redirect("/gestionale/debiti")
 
 
+@bp.post("/gestionale/debiti/<int:debt_id>/sollecito")
+@require_admin
+def debt_sollecito(debt_id: int):
+    debt = db.session.get(DebtItem, debt_id)
+    if not debt:
+        return render_template("partials/notify_result.html", error="Debito non trovato")
+
+    customer = db.session.get(Customer, debt.customer_id)
+    if not customer or not customer.email:
+        return render_template("partials/notify_result.html", error="Cliente senza indirizzo email")
+
+    from ..services.query import debt_outstanding, parse_decimal
+    outstanding = debt_outstanding(debt.amount_total, debt.amount_paid)
+
+    subject = f"Sollecito pagamento: {debt.label}"
+    body_html = render_template(
+        "email/debt_sollecito.html",
+        customer=customer,
+        debt=debt,
+        outstanding=outstanding,
+    )
+
+    try:
+        sender = (
+            current_app.config.get("MAIL_DEFAULT_SENDER")
+            or current_app.config.get("MAIL_USERNAME")
+            or "noreply@easydigitalagency.it"
+        )
+        msg = Message(subject=subject, sender=sender, recipients=[customer.email], html=body_html)
+        mail.send(msg)
+        suppressed = current_app.config.get("MAIL_SUPPRESS_SEND", False)
+        return render_template("partials/notify_result.html", success=True, email=customer.email, suppressed=suppressed)
+    except Exception as e:
+        return render_template("partials/notify_result.html", error=str(e))
+
+
+@bp.post("/gestionale/clienti/<int:customer_id>/riepilogo-email")
+@require_admin
+def customer_summary_email(customer_id: int):
+    customer = db.session.get(Customer, customer_id)
+    if not customer or not customer.email:
+        return render_template("partials/notify_result.html", error="Cliente senza indirizzo email")
+
+    from ..services.query import customer_detail_data, renewals_query, parse_decimal, debt_outstanding
+    data = customer_detail_data(customer_id)
+    if not data:
+        return render_template("partials/notify_result.html", error="Cliente non trovato")
+
+    # Upcoming renewals for this customer only
+    all_renewals = renewals_query(payment="pending")
+    upcoming_renewals = [r for r in all_renewals if r["customer_id"] == customer_id]
+
+    subject = f"Riepilogo account — {customer.company or customer.email}"
+    body_html = render_template(
+        "email/customer_summary.html",
+        customer=customer,
+        open_debts=data["open_debts"],
+        total_outstanding=data["total_outstanding"],
+        upcoming_renewals=upcoming_renewals,
+        app_base_url=current_app.config.get("APP_BASE_URL", ""),
+    )
+
+    try:
+        sender = (
+            current_app.config.get("MAIL_DEFAULT_SENDER")
+            or current_app.config.get("MAIL_USERNAME")
+            or "noreply@easydigitalagency.it"
+        )
+        msg = Message(subject=subject, sender=sender, recipients=[customer.email], html=body_html)
+        mail.send(msg)
+        suppressed = current_app.config.get("MAIL_SUPPRESS_SEND", False)
+        return render_template("partials/notify_result.html", success=True, email=customer.email, suppressed=suppressed)
+    except Exception as e:
+        return render_template("partials/notify_result.html", error=str(e))
+
+
 # ---------------------------------------------------------------------------
 # Abbonamenti
 # ---------------------------------------------------------------------------

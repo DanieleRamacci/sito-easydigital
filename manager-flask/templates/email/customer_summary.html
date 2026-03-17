@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Riepilogo account</title>
+<style>
+  body { margin: 0; padding: 0; background: #f5f8f6; font-family: ui-sans-serif, system-ui, Arial, sans-serif; color: #0f172a; }
+  .wrap { max-width: 580px; margin: 32px auto; background: #fff; border-radius: 12px; border: 1px solid #dce6df; overflow: hidden; }
+  .header { background: #1f8a4c; padding: 28px 32px; }
+  .header h1 { margin: 0; color: #fff; font-size: 1.3rem; font-weight: 700; }
+  .header p { margin: 4px 0 0; color: #bbf7d0; font-size: .88rem; }
+  .body { padding: 24px 32px; }
+  .greeting { font-size: 1rem; margin: 0 0 20px; }
+  .section-title { font-size: .78rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: #6b7280; margin: 0 0 8px; padding: 0 0 6px; border-bottom: 1px solid #e5e7eb; }
+  .item-table { width: 100%; border-collapse: collapse; margin: 0 0 24px; font-size: .88rem; }
+  .item-table td { padding: 7px 8px; border-bottom: 1px solid #f3f4f6; vertical-align: top; }
+  .item-table tr:last-child td { border-bottom: none; }
+  .item-table .label-col { color: #374151; }
+  .item-table .amount-col { text-align: right; font-weight: 600; white-space: nowrap; }
+  .item-table .date-col { color: #6b7280; font-size: .82rem; white-space: nowrap; }
+  .debt-amount { color: #dc2626; }
+  .total-row td { font-weight: 700; font-size: .95rem; border-top: 2px solid #e5e7eb; padding-top: 10px; }
+  .cta { text-align: center; margin: 0 0 24px; }
+  .cta-btn { display: inline-block; background: #1f8a4c; color: #fff !important; text-decoration: none; padding: 12px 28px; border-radius: 8px; font-weight: 600; font-size: .95rem; }
+  .empty-note { color: #9ca3af; font-size: .85rem; margin: 0 0 24px; font-style: italic; }
+  .footer { background: #f5f8f6; border-top: 1px solid #dce6df; padding: 18px 32px; font-size: .8rem; color: #9ca3af; text-align: center; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="header">
+    <h1>Riepilogo del tuo account</h1>
+    <p>EasyDigital — Area clienti</p>
+  </div>
+  <div class="body">
+    <p class="greeting">
+      Ciao {% if customer.company %}<strong>{{ customer.company }}</strong>{% else %}<strong>{{ customer.first_name }} {{ customer.last_name }}</strong>{% endif %},
+    </p>
+    <p style="margin:0 0 24px;font-size:.95rem;color:#374151;">
+      Ecco un riepilogo della tua situazione attuale: debiti aperti e prossimi rinnovi.
+    </p>
+
+    <!-- Debiti aperti -->
+    <div class="section-title">Debiti aperti</div>
+    {% if open_debts %}
+    <table class="item-table">
+      <tbody>
+        {% for d in open_debts %}
+        <tr>
+          <td class="label-col">{{ d.label }}</td>
+          <td class="date-col">{% if d.due_date %}Scad. {{ d.due_date.strftime('%d/%m/%Y') }}{% endif %}</td>
+          <td class="amount-col debt-amount">€ {{ "%.2f"|format(d.outstanding|float) }}</td>
+        </tr>
+        {% endfor %}
+        <tr class="total-row">
+          <td colspan="2">Totale residuo</td>
+          <td class="amount-col debt-amount">€ {{ "%.2f"|format(total_outstanding|float) }}</td>
+        </tr>
+      </tbody>
+    </table>
+    {% else %}
+    <p class="empty-note">Nessun debito aperto. Sei in regola!</p>
+    {% endif %}
+
+    <!-- Prossimi rinnovi -->
+    <div class="section-title">Prossimi rinnovi</div>
+    {% if upcoming_renewals %}
+    <table class="item-table">
+      <tbody>
+        {% for r in upcoming_renewals %}
+        <tr>
+          <td class="label-col">{{ r.service_name }}</td>
+          <td class="date-col">{% if r.renewal_date %}{{ r.renewal_date.strftime('%d/%m/%Y') }}{% endif %}</td>
+          <td class="amount-col">€ {{ "%.2f"|format(r.price|float) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="empty-note">Nessun rinnovo in programma.</p>
+    {% endif %}
+
+    {% if app_base_url %}
+    <div class="cta">
+      <a class="cta-btn" href="{{ app_base_url }}/areapersonale">Accedi all'area personale</a>
+    </div>
+    {% endif %}
+  </div>
+  <div class="footer">
+    EasyDigital Agency — <a href="mailto:info@easydigitalagency.it" style="color:#6b7280;">info@easydigitalagency.it</a>
+  </div>
+</div>
+</body>
+</html>

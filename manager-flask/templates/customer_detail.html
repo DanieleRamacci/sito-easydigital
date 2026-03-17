@@ -8,7 +8,11 @@
   </div>
   <div class="header-actions">
     <a href="/gestionale/lavori/nuovo?customer_id={{ customer.id }}" class="btn btn-sm">+ Nuovo lavoro</a>
-    <a href="/gestionale/clienti/{{ customer.id }}/anteprima-area" target="_blank" class="btn btn-sm btn-outline" title="Vedi cosa vede il cliente nella sua area personale">👁 Anteprima area cliente</a>
+    <a href="/gestionale/clienti/{{ customer.id }}/anteprima-area" target="_blank" class="btn btn-sm btn-outline" title="Vedi cosa vede il cliente nella sua area personale">Anteprima area cliente</a>
+    {% if customer.email %}
+    <button class="btn btn-sm btn-outline" onclick="openSummaryModal()"
+      title="Invia email con riepilogo debiti aperti e prossimi rinnovi">Invia riepilogo</button>
+    {% endif %}
     <button class="btn btn-sm btn-outline"
       hx-post="/gestionale/clienti/{{ customer.id }}/invita"
       hx-target="#invite-area"
@@ -21,6 +25,7 @@
   </div>
 </div>
 <div id="invite-area"></div>
+<div id="summary-email-result" style="margin:4px 0 0;"></div>
 
 <!-- Riepilogo finanziario -->
 <div class="kpi-grid kpi-grid-sm">
@@ -222,15 +227,59 @@
     <tbody>
       {% for d in open_debts %}
       <tr>
-        <td>{{ d.label }}</td>
+        <td>
+          {% if d.services_breakdown %}
+          <details>
+            <summary style="cursor:pointer;list-style:none;display:flex;align-items:center;gap:6px;">
+              <span style="color:var(--brand);font-size:.75rem;" class="details-arrow">▶</span>
+              <span style="font-weight:600;">{{ d.label }}</span>
+            </summary>
+            <table style="margin:8px 0 2px 18px;font-size:.82rem;border-collapse:collapse;color:#374151;">
+              <thead>
+                <tr>
+                  <th style="padding:3px 14px 3px 0;font-weight:600;color:var(--muted);font-size:.78rem;">Servizio</th>
+                  <th style="padding:3px 14px 3px 0;font-weight:600;color:var(--muted);font-size:.78rem;">Tipo</th>
+                  <th style="padding:3px 0;font-weight:600;color:var(--muted);font-size:.78rem;">Prezzo</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for s in d.services_breakdown %}
+                <tr>
+                  <td style="padding:3px 14px 3px 0;">{{ s.name }}</td>
+                  <td style="padding:3px 14px 3px 0;color:var(--muted);">
+                    {% if s.billing_type == 'subscription' %}
+                      Abbonamento {% if s.billing_interval == 'monthly' %}mensile{% elif s.billing_interval == 'semiannual' %}semestrale{% else %}annuale{% endif %}
+                    {% else %}
+                      Una tantum
+                    {% endif %}
+                  </td>
+                  <td style="padding:3px 0;font-weight:600;">{{ fmt_money(s.price) }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </details>
+          {% else %}
+          {{ d.label }}
+          {% endif %}
+        </td>
         <td>{{ 'Abbonamento' if d.source_type == 'subscription' else 'Una tantum' }}</td>
         <td>{{ fmt_date(d.due_date) }}</td>
         <td>{{ fmt_money(d.amount_total) }}</td>
         <td>{{ fmt_money(d.amount_paid) }}</td>
         <td><strong>{{ fmt_money(d.outstanding) }}</strong></td>
         <td>
-          <button class="btn-xs"
-            onclick="togglePayForm({{ d.debt_id }})">Registra pagamento</button>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+            <button class="btn-xs" onclick="togglePayForm({{ d.debt_id }})">Registra pagamento</button>
+            {% if customer.email %}
+            <button class="btn-xs btn-outline"
+              hx-post="/gestionale/debiti/{{ d.debt_id }}/sollecito"
+              hx-target="#sollecito-result-{{ d.debt_id }}"
+              hx-swap="innerHTML"
+              hx-confirm="Inviare sollecito di pagamento a {{ customer.email }}?">Sollecito</button>
+            {% endif %}
+            <span id="sollecito-result-{{ d.debt_id }}"></span>
+          </div>
           <div id="pay-form-{{ d.debt_id }}" class="pay-form" style="display:none">
             <form method="POST" action="/gestionale/debiti/{{ d.debt_id }}/payments/new">
               <input type="date" name="date" value="{{ '' }}" required style="width:130px" />
@@ -419,5 +468,46 @@ function confirmSubPay() {
 document.getElementById('sub-pay-modal').addEventListener('click', function(e) {
   if (e.target === this) closeSubPayModal();
 });
+
+// Summary email modal
+function openSummaryModal() {
+  document.getElementById('summary-modal').style.display = 'flex';
+}
+function closeSummaryModal() {
+  document.getElementById('summary-modal').style.display = 'none';
+}
+function confirmSummaryEmail() {
+  const btn = document.getElementById('summary-confirm-btn');
+  btn.disabled = true;
+  btn.textContent = 'Invio…';
+  closeSummaryModal();
+  htmx.ajax('POST', '/gestionale/clienti/{{ customer.id }}/riepilogo-email', {
+    target: '#summary-email-result',
+    swap: 'innerHTML'
+  });
+}
+document.getElementById('summary-modal').addEventListener('click', function(e) {
+  if (e.target === this) closeSummaryModal();
+});
 </script>
+
+<!-- Modal conferma invio riepilogo -->
+<div id="summary-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:999;align-items:center;justify-content:center;">
+  <div style="background:#fff;border-radius:12px;padding:28px 32px;max-width:440px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,.18);">
+    <h3 style="margin:0 0 12px;">Invia riepilogo al cliente</h3>
+    <p style="margin:0 0 8px;font-size:.95rem;color:#374151;">
+      Verrà inviata un'email a <strong>{{ customer.email }}</strong> con:
+    </p>
+    <ul style="margin:0 0 20px;padding-left:20px;font-size:.9rem;color:#374151;line-height:1.7;">
+      <li>Tutti i debiti aperti con importi residui</li>
+      <li>I prossimi rinnovi attivi con scadenze</li>
+      <li>Link diretto all'area personale</li>
+    </ul>
+    <div style="display:flex;gap:10px;justify-content:flex-end;">
+      <button class="btn btn-sm btn-outline" onclick="closeSummaryModal()">Annulla</button>
+      <button class="btn btn-sm" id="summary-confirm-btn" onclick="confirmSummaryEmail()">Invia email</button>
+    </div>
+  </div>
+</div>
+
 {% endblock %}
