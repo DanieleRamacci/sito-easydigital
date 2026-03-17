@@ -105,10 +105,7 @@ def get_vat_type_22() -> tuple[int, str]:
                 continue
             data = resp.json().get("data", {})
             # Response may nest vat_types under different keys
-            vat_list = (
-                data.get("vat_types", {}).get("data", [])
-                or data.get("vat_types", [])
-            )
+            vat_list = data.get("vat_types_list", [])
             for vt in vat_list:
                 if vt.get("value") == 22 and not vt.get("is_disabled"):
                     _vat_22_cache[cid] = vt["id"]
@@ -128,23 +125,37 @@ def get_documents_by_type(fic_entity_id: int, doc_type: str, only_unpaid: bool =
     """Return FIC documents of a given type for an entity.
     doc_type: 'invoice' | 'proforma' | 'quote'
     If only_unpaid=True, filters to not_paid status only.
+    Fetches all pages and filters client-side by entity_id for reliability.
     """
+    all_docs: list[dict] = []
+    page = 1
     try:
-        resp = requests.get(
-            f"{FIC_BASE}/c/{_cid()}/issued_documents",
-            params={
-                "type": doc_type,
-                "entity_id": fic_entity_id,
-                "fields": "id,type,date,number,numeration,status,amount_gross,amount_net,entity,payments_list",
-            },
-            headers=_headers(),
-            timeout=8,
-        )
-        if resp.status_code == 401:
-            return [], "Token FIC non valido o scaduto."
-        if not resp.ok:
-            return [], f"Errore API FIC ({resp.status_code})"
-        docs = resp.json().get("data", [])
+        while True:
+            resp = requests.get(
+                f"{FIC_BASE}/c/{_cid()}/issued_documents",
+                params={
+                    "type": doc_type,
+                    "entity_id": fic_entity_id,
+                    "fields": "id,type,date,number,numeration,status,amount_gross,amount_net,entity,payments_list",
+                    "page": page,
+                    "per_page": 50,
+                },
+                headers=_headers(),
+                timeout=8,
+            )
+            if resp.status_code == 401:
+                return [], "Token FIC non valido o scaduto."
+            if not resp.ok:
+                return [], f"Errore API FIC ({resp.status_code})"
+            data = resp.json()
+            all_docs.extend(data.get("data", []))
+            pagination = data.get("pagination", {})
+            if page >= pagination.get("last_page", 1):
+                break
+            page += 1
+
+        # Filter client-side by entity_id to guarantee correctness
+        docs = [d for d in all_docs if d.get("entity", {}).get("id") == fic_entity_id]
         if only_unpaid:
             docs = [d for d in docs if d.get("status") in ("not_paid", None, "")]
         docs.sort(key=lambda d: d.get("date") or "", reverse=True)
@@ -210,7 +221,7 @@ def create_quote_from_job(job, vat_id: int = 0) -> tuple[dict, str]:
         entity = {"name": job.title}
 
     # Build VAT object: use id if available, otherwise fall back to value-only
-    vat_obj = {"id": vat_id} if vat_id else {"value": 22}
+    vat_obj = {"id": vat_id, "value": 22}
 
     # Build line items from job services, fallback to job amount
     items: list[dict] = []
