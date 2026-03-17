@@ -86,19 +86,23 @@ def fetch_all_clients(max_pages: int = 10) -> tuple[list[dict], str]:
 # ---------------------------------------------------------------------------
 
 def get_vat_type_22() -> tuple[int, str]:
-    """Return the FIC vat_type id for 22% IVA ordinaria. Cached per company."""
+    """Return the FIC vat_type id for 22% IVA ordinaria. Cached per company.
+    Uses /issued_documents/info which returns all available VAT types.
+    """
     cid = _cid()
     if cid in _vat_22_cache:
         return _vat_22_cache[cid], ""
     try:
         resp = requests.get(
-            f"{FIC_BASE}/c/{cid}/vat_types",
+            f"{FIC_BASE}/c/{cid}/issued_documents/info",
+            params={"document_type": "quote"},
             headers=_headers(),
             timeout=8,
         )
         if not resp.ok:
             return 0, f"Errore nel recupero aliquote IVA ({resp.status_code})"
-        for vt in resp.json().get("data", []):
+        vat_types = resp.json().get("data", {}).get("vat_types", {}).get("data", [])
+        for vt in vat_types:
             if vt.get("value") == 22 and not vt.get("is_disabled"):
                 _vat_22_cache[cid] = vt["id"]
                 return vt["id"], ""
@@ -111,35 +115,48 @@ def get_vat_type_22() -> tuple[int, str]:
 # Documents
 # ---------------------------------------------------------------------------
 
+def get_documents_by_type(fic_entity_id: int, doc_type: str, only_unpaid: bool = False) -> tuple[list[dict], str]:
+    """Return FIC documents of a given type for an entity.
+    doc_type: 'invoice' | 'proforma' | 'quote'
+    If only_unpaid=True, filters to not_paid status only.
+    """
+    try:
+        resp = requests.get(
+            f"{FIC_BASE}/c/{_cid()}/issued_documents",
+            params={
+                "type": doc_type,
+                "entity_id": fic_entity_id,
+                "fields": "id,type,date,number,numeration,status,amount_gross,amount_net,entity,payments_list",
+            },
+            headers=_headers(),
+            timeout=8,
+        )
+        if resp.status_code == 401:
+            return [], "Token FIC non valido o scaduto."
+        if not resp.ok:
+            return [], f"Errore API FIC ({resp.status_code})"
+        docs = resp.json().get("data", [])
+        if only_unpaid:
+            docs = [d for d in docs if d.get("status") in ("not_paid", None, "")]
+        docs.sort(key=lambda d: d.get("date") or "", reverse=True)
+        return docs, ""
+    except requests.exceptions.Timeout:
+        return [], "Timeout connessione a FattureInCloud."
+    except Exception as exc:
+        return [], f"Errore di rete: {exc}"
+
+
 def get_unpaid_documents(fic_entity_id: int) -> tuple[list[dict], str]:
     """Return all unpaid invoices and proforma for the given FIC entity."""
     docs: list[dict] = []
     error = ""
     for doc_type in ("invoice", "proforma"):
-        try:
-            resp = requests.get(
-                f"{FIC_BASE}/c/{_cid()}/issued_documents",
-                params={
-                    "type": doc_type,
-                    "entity_id": fic_entity_id,
-                    "fields": "id,type,date,number,numeration,status,amount_gross,amount_net,entity,payments_list",
-                },
-                headers=_headers(),
-                timeout=8,
-            )
-            if resp.status_code == 401:
-                return [], "Token FIC non valido o scaduto."
-            if not resp.ok:
-                error = f"Errore API FIC ({resp.status_code})"
-                continue
-            for d in resp.json().get("data", []):
-                if d.get("status") in ("not_paid", None, ""):
-                    d["doc_type"] = doc_type
-                    docs.append(d)
-        except requests.exceptions.Timeout:
-            return [], "Timeout connessione a FattureInCloud."
-        except Exception as exc:
-            return [], f"Errore di rete: {exc}"
+        part, err = get_documents_by_type(fic_entity_id, doc_type, only_unpaid=True)
+        if err:
+            error = err
+        for d in part:
+            d["doc_type"] = doc_type
+            docs.append(d)
     docs.sort(key=lambda d: d.get("date") or "", reverse=True)
     return docs, error
 

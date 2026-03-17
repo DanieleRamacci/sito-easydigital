@@ -99,7 +99,7 @@
   <a class="tab-btn" data-panel="panel-note" href="#panel-note" onclick="switchTab(event,'panel-note')">Note diario ({{ notes_list|length }})</a>
   <a class="tab-btn" data-panel="panel-debiti" href="#panel-debiti" onclick="switchTab(event,'panel-debiti')">Debiti</a>
   {% if fic_configured %}
-  <a class="tab-btn" data-panel="panel-fic" href="#panel-fic" onclick="switchTab(event,'panel-fic')">Fatture FIC</a>
+  <a class="tab-btn" data-panel="panel-fic" href="#panel-fic" onclick="switchTab(event,'panel-fic')">Preventivo FIC</a>
   {% endif %}
 </div>
 
@@ -210,10 +210,10 @@
   {% endif %}
 </div>
 
-<!-- Tab: FIC -->
+<!-- Tab: Preventivo FIC -->
 {% if fic_configured %}
 <div class="tab-panel card" id="panel-fic" style="display:none;">
-  <h2>FattureInCloud</h2>
+  <h2>Preventivo FIC</h2>
 
   {% if fic_doc_error %}
   <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:12px 16px;font-size:.88rem;color:#991b1b;margin-bottom:14px;">

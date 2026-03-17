@@ -55,7 +55,8 @@
   <a class="tab-link" href="#sec-debiti" onclick="showTab(event,'sec-debiti')">Debiti aperti</a>
   <a class="tab-link" href="#sec-versamenti" onclick="showTab(event,'sec-versamenti')">Storico versamenti</a>
   <a class="tab-link" href="#sec-note" onclick="showTab(event,'sec-note')">Note ({{ note_list|length }})</a>
-  <a class="tab-link" href="#sec-fic" onclick="showTab(event,'sec-fic')">Fatture FIC</a>
+  <a class="tab-link" href="#sec-preventivi" onclick="showTab(event,'sec-preventivi')">Preventivi FIC</a>
+  <a class="tab-link" href="#sec-fatture" onclick="showTab(event,'sec-fatture')">Fatture FIC</a>
   <a class="tab-link" href="#sec-modifica" onclick="showTab(event,'sec-modifica')">Modifica anagrafica</a>
 </div>
 
@@ -348,10 +349,10 @@
   {% endif %}
 </section>
 
-<!-- Fatture FIC -->
-<section id="sec-fic" class="card tab-section">
+<!-- Preventivi FIC -->
+<section id="sec-preventivi" class="card tab-section">
   <div class="section-header">
-    <h2>Fatture FIC — da pagare</h2>
+    <h2>Preventivi FIC</h2>
     {% if customer.fic_entity_id %}
     <form method="POST" action="/gestionale/clienti/{{ customer.id }}/fic-scollega"
       onsubmit="return confirm('Scollegare questo cliente da FattureInCloud?')" style="display:inline;">
@@ -359,14 +360,23 @@
     </form>
     {% endif %}
   </div>
-
   {% if customer.fic_entity_id %}
-  <p style="font-size:.83rem;color:#6b7280;margin:0 0 12px;">
-    Cliente FIC collegato — ID <strong>{{ customer.fic_entity_id }}</strong>
-  </p>
+  <p style="font-size:.83rem;color:#6b7280;margin:0 0 12px;">Cliente FIC — ID <strong>{{ customer.fic_entity_id }}</strong></p>
   {% endif %}
+  <div id="fic-preventivi-content"
+    hx-get="/gestionale/clienti/{{ customer.id }}/fic-preventivi"
+    hx-trigger="revealed"
+    hx-swap="innerHTML">
+    <p class="muted" style="font-size:.88rem;">Caricamento preventivi…</p>
+  </div>
+</section>
 
-  <div id="fic-content"
+<!-- Fatture FIC -->
+<section id="sec-fatture" class="card tab-section">
+  <div class="section-header">
+    <h2>Fatture FIC — da pagare</h2>
+  </div>
+  <div id="fic-fatture-content"
     hx-get="/gestionale/clienti/{{ customer.id }}/fic-fatture"
     hx-trigger="revealed"
     hx-swap="innerHTML">

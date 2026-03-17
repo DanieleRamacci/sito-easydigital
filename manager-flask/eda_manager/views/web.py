@@ -1139,6 +1139,7 @@ def fic_importa_singolo():
         if customer:
             customer.fic_entity_id = fic_entity_id
             db.session.commit()
+        return redirect("/gestionale/clienti")
     elif action == "import":
         company = (request.form.get("name") or "").strip()
         vat = (request.form.get("vat_number") or "").strip()
@@ -1165,7 +1166,7 @@ def fic_importa_singolo():
             db.session.add(new_customer)
         db.session.commit()
 
-    return redirect("/gestionale/fic/importa-clienti")
+    return redirect("/gestionale/clienti")
 
 
 @bp.post("/gestionale/lavori/<int:job_id>/fic-preventivo")
@@ -1201,22 +1202,47 @@ def fic_scollega_lavoro(job_id: int):
     return redirect(f"/gestionale/lavori/{job_id}")
 
 
+@bp.get("/gestionale/clienti/<int:customer_id>/fic-preventivi")
+@require_admin
+def fic_preventivi(customer_id: int):
+    """HTMX: load FIC quotes for a customer, enriched with linked job info."""
+    from ..services.fic import fic_enabled, get_documents_by_type
+    customer = Customer.query.get_or_404(customer_id)
+
+    if not fic_enabled():
+        return render_template("partials/fic_preventivi.html",
+                               customer=customer, docs=[], error=None, not_configured=True)
+    if not customer.fic_entity_id:
+        return render_template("partials/fic_preventivi.html",
+                               customer=customer, docs=[], error=None, not_linked=True)
+
+    docs, error = get_documents_by_type(customer.fic_entity_id, "quote")
+
+    # Enrich each quote with the linked job (if any)
+    jobs_by_fic = {j.fic_document_id: j for j in customer.jobs if j.fic_document_id}
+    for d in docs:
+        d["linked_job"] = jobs_by_fic.get(d["id"])
+
+    return render_template("partials/fic_preventivi.html",
+                           customer=customer, docs=docs, error=error,
+                           not_configured=False, not_linked=False)
+
+
 @bp.get("/gestionale/clienti/<int:customer_id>/fic-fatture")
 @require_admin
 def fic_fatture(customer_id: int):
-    """HTMX: load unpaid FIC invoices/proforma for a customer (lazy)."""
-    from ..services.fic import fic_enabled, get_unpaid_documents
+    """HTMX: load unpaid FIC invoices for a customer (lazy)."""
+    from ..services.fic import fic_enabled, get_documents_by_type
     customer = Customer.query.get_or_404(customer_id)
 
     if not fic_enabled():
         return render_template("partials/fic_invoices.html",
                                customer=customer, docs=[], error=None, not_configured=True)
-
     if not customer.fic_entity_id:
         return render_template("partials/fic_invoices.html",
                                customer=customer, docs=[], error=None, not_linked=True)
 
-    docs, error = get_unpaid_documents(customer.fic_entity_id)
+    docs, error = get_documents_by_type(customer.fic_entity_id, "invoice", only_unpaid=True)
     return render_template("partials/fic_invoices.html",
                            customer=customer, docs=docs, error=error,
                            not_configured=False, not_linked=False)
