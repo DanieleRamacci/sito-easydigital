@@ -62,6 +62,20 @@ from ..services.query import (
 bp = Blueprint("web", __name__)
 
 
+def _mail_send(msg, timeout: int = 10):
+    """Send mail with a socket timeout to prevent gunicorn worker hangs.
+    Flask-Mail 0.10 does not pass a timeout to smtplib; without this the
+    SMTP TCP connect can block for 60–120 s and trigger a gunicorn WORKER TIMEOUT.
+    """
+    import socket
+    old = socket.getdefaulttimeout()
+    socket.setdefaulttimeout(timeout)
+    try:
+        mail.send(msg)
+    finally:
+        socket.setdefaulttimeout(old)
+
+
 # ---------------------------------------------------------------------------
 # Template helpers
 # ---------------------------------------------------------------------------
@@ -277,7 +291,7 @@ def customer_send_email(customer_id: int):
             recipients=[customer.email],
             body=body,
         )
-        mail.send(msg)
+        _mail_send(msg)
         return render_template("partials/email_sent.html", customer=customer)
     except Exception as e:
         return f"Errore invio email: {e}", 500
@@ -381,12 +395,19 @@ def debt_sollecito(debt_id: int):
 
     from ..services.query import debt_outstanding, parse_decimal
     outstanding = debt_outstanding(debt.amount_total, debt.amount_paid)
+    # Pass a plain dict to avoid SQLAlchemy ORM recursion in Jinja2 (lazy="dynamic" relationships)
+    debt_data = {
+        "label": debt.label,
+        "due_date": debt.due_date,
+        "amount_total": parse_decimal(debt.amount_total),
+        "amount_paid": parse_decimal(debt.amount_paid),
+    }
 
     subject = f"Sollecito pagamento: {debt.label}"
     body_html = render_template(
         "email/debt_sollecito.html",
         customer=customer,
-        debt=debt,
+        debt=debt_data,
         outstanding=outstanding,
     )
 
@@ -397,7 +418,7 @@ def debt_sollecito(debt_id: int):
             or "noreply@easydigitalagency.it"
         )
         msg = Message(subject=subject, sender=sender, recipients=[customer.email], html=body_html)
-        mail.send(msg)
+        _mail_send(msg)
         suppressed = current_app.config.get("MAIL_SUPPRESS_SEND", False)
         return render_template("partials/notify_result.html", success=True, email=customer.email, suppressed=suppressed)
     except Exception as e:
@@ -437,7 +458,7 @@ def customer_summary_email(customer_id: int):
             or "noreply@easydigitalagency.it"
         )
         msg = Message(subject=subject, sender=sender, recipients=[customer.email], html=body_html)
-        mail.send(msg)
+        _mail_send(msg)
         suppressed = current_app.config.get("MAIL_SUPPRESS_SEND", False)
         return render_template("partials/notify_result.html", success=True, email=customer.email, suppressed=suppressed)
     except Exception as e:
@@ -629,7 +650,7 @@ def renewal_notify(sub_id: int):
             recipients=[customer.email],
             html=body_html,
         )
-        mail.send(msg)
+        _mail_send(msg)
         suppressed = current_app.config.get("MAIL_SUPPRESS_SEND", False)
         return render_template("partials/notify_result.html", success=True, email=customer.email, suppressed=suppressed)
     except Exception as e:
