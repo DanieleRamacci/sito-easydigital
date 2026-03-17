@@ -1,30 +1,144 @@
 {% extends "base.html" %}
 {% block content %}
 <div class="section-header">
-  <h1>Rinnovi in scadenza</h1>
-  <div style="display:flex;gap:8px;align-items:center;">
-    <form hx-get="/gestionale/rinnovi/table" hx-target="#renewals-table" hx-trigger="change from:select" style="margin:0">
-      <select name="months">
-        <option value="1" {% if months==1 %}selected{% endif %}>Prossimo mese</option>
-        <option value="2" {% if months==2 %}selected{% endif %}>2 mesi</option>
-        <option value="3" {% if months==3 %}selected{% endif %}>3 mesi</option>
-        <option value="6" {% if months==6 %}selected{% endif %}>6 mesi</option>
-        <option value="12" {% if months==12 %}selected{% endif %}>12 mesi</option>
-      </select>
-    </form>
-    <button class="btn btn-sm"
-      hx-post="/gestionale/rinnovi/processa"
-      hx-target="#process-result"
-      hx-swap="innerHTML"
-      hx-confirm="Generare i DebtItem per tutti i rinnovi scaduti oggi?">
-      Processa rinnovi scaduti
-    </button>
-  </div>
+  <h1>Rinnovi</h1>
+  <form hx-get="/gestionale/rinnovi/table" hx-target="#renewals-table" hx-trigger="change from:select" hx-include="this" style="margin:0;">
+    <select name="payment">
+      <option value="pending" {% if payment=='pending' %}selected{% endif %}>Da pagare</option>
+      <option value="paid" {% if payment=='paid' %}selected{% endif %}>Pagati</option>
+      <option value="" {% if payment=='' %}selected{% endif %}>Tutti</option>
+    </select>
+  </form>
 </div>
-
-<div id="process-result"></div>
 
 <div id="renewals-table" class="card">
   {% include "partials/renewals_table.html" %}
 </div>
+
+<!-- Modal conferma pagamento -->
+<div id="pay-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:999;align-items:center;justify-content:center;">
+  <div style="background:#fff;border-radius:12px;padding:28px 32px;max-width:420px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,.18);">
+    <h3 style="margin:0 0 8px;">Conferma pagamento</h3>
+    <p id="modal-cliente" style="margin:0 0 4px;font-weight:600;font-size:1rem;"></p>
+    <p id="modal-servizio" style="margin:0 0 4px;color:#6b7280;font-size:.9rem;"></p>
+    <p id="modal-importo" style="margin:0 0 20px;font-size:.9rem;"></p>
+    <p style="margin:0 0 20px;font-size:.88rem;color:#374151;">
+      Il ciclo corrente verrà segnato come pagato e la data di rinnovo avanzerà al periodo successivo.
+    </p>
+    <div style="display:flex;gap:10px;justify-content:flex-end;">
+      <button class="btn btn-sm btn-outline" onclick="closePayModal()">Annulla</button>
+      <button class="btn btn-sm" id="modal-confirm-btn" onclick="confirmPay()">Conferma pagamento</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal conferma notifica email -->
+<div id="notify-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:999;align-items:center;justify-content:center;">
+  <div style="background:#fff;border-radius:12px;padding:28px 32px;max-width:460px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,.18);">
+    <h3 style="margin:0 0 16px;">Invia promemoria rinnovo</h3>
+    <div style="background:#f5f8f6;border:1px solid #dce6df;border-radius:8px;padding:14px 16px;margin:0 0 16px;font-size:.9rem;">
+      <div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #e5e7eb;">
+        <span style="color:#6b7280;">Destinatario</span>
+        <span id="nm-email" style="font-weight:600;"></span>
+      </div>
+      <div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #e5e7eb;">
+        <span style="color:#6b7280;">Cliente</span>
+        <span id="nm-cliente"></span>
+      </div>
+      <div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #e5e7eb;">
+        <span style="color:#6b7280;">Servizio</span>
+        <span id="nm-servizio"></span>
+      </div>
+      <div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #e5e7eb;">
+        <span style="color:#6b7280;">Scadenza</span>
+        <span id="nm-data" style="font-weight:600;color:#1f8a4c;"></span>
+      </div>
+      <div style="display:flex;justify-content:space-between;padding:4px 0;">
+        <span style="color:#6b7280;">Importo</span>
+        <span id="nm-importo"></span>
+      </div>
+    </div>
+    <p style="margin:0 0 20px;font-size:.85rem;color:#6b7280;">
+      Verrà inviata un'email HTML di promemoria al cliente con i dettagli del rinnovo.
+    </p>
+    <div style="display:flex;gap:10px;justify-content:flex-end;">
+      <button class="btn btn-sm btn-outline" onclick="closeNotifyModal()">Annulla</button>
+      <button class="btn btn-sm" id="nm-confirm-btn" onclick="confirmNotify()">Invia email</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ---- Pay modal ----
+let _pendingSubId = null;
+
+function openPayModal(subId, cliente, servizio, importo) {
+  _pendingSubId = subId;
+  document.getElementById('modal-cliente').textContent = cliente;
+  document.getElementById('modal-servizio').textContent = servizio;
+  document.getElementById('modal-importo').textContent = 'Importo: ' + importo;
+  const modal = document.getElementById('pay-modal');
+  modal.style.display = 'flex';
+}
+
+function closePayModal() {
+  document.getElementById('pay-modal').style.display = 'none';
+  _pendingSubId = null;
+}
+
+function confirmPay() {
+  if (!_pendingSubId) return;
+  const subId = _pendingSubId;
+  const btn = document.getElementById('modal-confirm-btn');
+  btn.disabled = true;
+  btn.textContent = 'Salvataggio…';
+  closePayModal();
+  htmx.ajax('POST', '/gestionale/rinnovi/' + subId + '/paga', {
+    target: '#renewals-table',
+    swap: 'innerHTML'
+  });
+}
+
+document.getElementById('pay-modal').addEventListener('click', function(e) {
+  if (e.target === this) closePayModal();
+});
+
+// ---- Notify modal ----
+let _notifySubId = null;
+
+function openNotifyModal(subId, cliente, servizio, email, data, importo) {
+  _notifySubId = subId;
+  document.getElementById('nm-email').textContent = email;
+  document.getElementById('nm-cliente').textContent = cliente;
+  document.getElementById('nm-servizio').textContent = servizio;
+  document.getElementById('nm-data').textContent = data;
+  document.getElementById('nm-importo').textContent = importo;
+  const btn = document.getElementById('nm-confirm-btn');
+  btn.disabled = false;
+  btn.textContent = 'Invia email';
+  document.getElementById('notify-modal').style.display = 'flex';
+}
+
+function closeNotifyModal() {
+  document.getElementById('notify-modal').style.display = 'none';
+  _notifySubId = null;
+}
+
+function confirmNotify() {
+  if (!_notifySubId) return;
+  const subId = _notifySubId;
+  const btn = document.getElementById('nm-confirm-btn');
+  btn.disabled = true;
+  btn.textContent = 'Invio…';
+  closeNotifyModal();
+  htmx.ajax('POST', '/gestionale/rinnovi/' + subId + '/notifica', {
+    target: '#notify-result-' + subId,
+    swap: 'innerHTML'
+  });
+}
+
+document.getElementById('notify-modal').addEventListener('click', function(e) {
+  if (e.target === this) closeNotifyModal();
+});
+</script>
 {% endblock %}

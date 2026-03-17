@@ -210,3 +210,5 @@ textarea { resize: vertical }
   color: #374151;
   font-size: .93rem;
 }
+
+.year-separator td { background: #f3f4f6; font-weight: 700; font-size: .8rem; color: #6b7280; letter-spacing: .05em; padding: 6px 8px; text-transform: uppercase; }

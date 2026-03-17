@@ -1,43 +1,70 @@
-{% if rows %}
-<table class="tbl">
-  <thead>
-    <tr>
-      <th>Cliente</th>
-      <th>Servizio</th>
-      <th>Scadenza</th>
-      <th>Ricorrenza</th>
-      <th>Importo</th>
-      <th>Stato</th>
-      <th></th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for r in rows %}
-    <tr>
-      <td><a href="/gestionale/clienti/{{ r.customer_id }}">{{ r.customer_name }}</a></td>
-      <td>{{ r.service_name }}</td>
-      <td>
-        {{ fmt_date(r.renewal_date) }}
-      </td>
-      <td>{{ r.interval_label }}</td>
-      <td>{{ fmt_money(r.price) }}</td>
-      <td>
-        {% if r.payment_status == 'paid' %}
-          <span class="badge badge-paid">Pagato</span>
+{% if flash_error %}
+<p class="badge badge-danger" style="margin-bottom:8px;">{{ flash_error }}</p>
+{% endif %}
+
+{% macro renewal_rows(items) %}
+{% set ns = namespace(current_year=0) %}
+{% for r in items %}
+  {% if r.renewal_year != ns.current_year %}
+    {% set ns.current_year = r.renewal_year %}
+    <tr class="year-separator"><td colspan="6">{{ ns.current_year }}</td></tr>
+  {% endif %}
+  <tr>
+    <td><a href="/gestionale/clienti/{{ r.customer_id }}">{{ r.customer_name }}</a></td>
+    <td>{{ r.service_name }}</td>
+    <td>{{ fmt_date(r.renewal_date) }}</td>
+    <td>{{ fmt_money(r.price) }}</td>
+    <td>
+      {% if r.payment_status == 'paid' %}
+        <span class="badge badge-paid">Pagato</span>
+      {% else %}
+        <span class="badge badge-pending">Da pagare</span>
+      {% endif %}
+    </td>
+    <td style="white-space:nowrap;">
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+        {% if r.payment_status != 'paid' %}
+          <button class="btn-xs"
+            onclick="openPayModal({{ r.sub_id }}, '{{ r.customer_name|e }}', '{{ r.service_name|e }}', '{{ fmt_money(r.price) }}')">
+            Segna pagato
+          </button>
         {% else %}
-          <span class="badge badge-pending">In attesa</span>
+          <a href="/gestionale/clienti/{{ r.customer_id }}" class="btn-xs btn-outline">Scheda</a>
         {% endif %}
-      </td>
-      <td>
-        <a href="/gestionale/clienti/{{ r.customer_id }}" class="btn-xs">Scheda cliente</a>
-        {% if r.debt_id %}
-        <span class="badge badge-info">Fattura generata</span>
+        {% if r.customer_email %}
+          <button class="btn-xs btn-outline"
+            onclick="openNotifyModal({{ r.sub_id }}, '{{ r.customer_name|e }}', '{{ r.service_name|e }}', '{{ r.customer_email|e }}', '{{ fmt_date(r.renewal_date) }}', '{{ fmt_money(r.price) }}')">
+            Invia notifica
+          </button>
         {% endif %}
-      </td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
+        <span id="notify-result-{{ r.sub_id }}"></span>
+      </div>
+    </td>
+  </tr>
+{% endfor %}
+{% endmacro %}
+
+{% set annual_rows = rows | selectattr('billing_interval', 'in', ['annual', 'semiannual']) | list %}
+{% set monthly_rows = rows | selectattr('billing_interval', 'equalto', 'monthly') | list %}
+
+{% if not rows %}
+<p class="muted">Nessun rinnovo trovato.</p>
 {% else %}
-<p class="muted">Nessun rinnovo in scadenza nel periodo selezionato.</p>
+
+{% if annual_rows %}
+<h3 style="margin:0 0 10px;font-size:.95rem;font-weight:700;">Rinnovi annuali / semestrali</h3>
+<table class="tbl" style="margin-bottom:28px;">
+  <thead><tr><th>Cliente</th><th>Servizio</th><th>Scadenza</th><th>Importo</th><th>Stato</th><th></th></tr></thead>
+  <tbody>{{ renewal_rows(annual_rows) }}</tbody>
+</table>
+{% endif %}
+
+{% if monthly_rows %}
+<h3 style="margin:0 0 10px;font-size:.95rem;font-weight:700;">Rinnovi mensili</h3>
+<table class="tbl">
+  <thead><tr><th>Cliente</th><th>Servizio</th><th>Scadenza</th><th>Importo</th><th>Stato</th><th></th></tr></thead>
+  <tbody>{{ renewal_rows(monthly_rows) }}</tbody>
+</table>
+{% endif %}
+
 {% endif %}

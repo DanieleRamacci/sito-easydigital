@@ -39,6 +39,8 @@ def _verify_jwt() -> dict | None:
 def redirect_to_wp_login(next_path: str):
     wp_base = current_app.config.get("WP_BASE_URL", "")
     if not wp_base:
+        if current_app.config.get("DEV_MODE"):
+            return redirect(f"/dev-login?next={next_path}")
         abort(500, description="WP_BASE_URL non configurato")
     return redirect(f"{wp_base}/wp-json/eda-auth/v1/sso-start?next={next_path}")
 

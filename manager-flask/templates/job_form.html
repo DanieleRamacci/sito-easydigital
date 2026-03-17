@@ -66,29 +66,79 @@
     </div>
 
     <div class="form-section">
-      <div class="form-section-title">Servizi collegati</div>
+      <div class="form-section-title" style="display:flex;justify-content:space-between;align-items:center;">
+        Servizi collegati
+        <button type="button" class="btn btn-sm btn-outline" id="toggleNewService">+ Crea nuovo servizio</button>
+      </div>
+
+      <!-- Picker servizi esistenti -->
       <div class="form-group">
-        <label>Seleziona servizi (puoi sceglierne più di uno)</label>
+        <label>Seleziona servizi dal catalogo</label>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px;">
           <select id="servicePicker" style="flex:1;min-width:200px;">
             <option value="">— Aggiungi servizio —</option>
             {% for s in services %}
-            <option value="{{ s.id }}" data-price="{{ s.price }}">{{ s.name }} ({{ fmt_money(s.price) }})</option>
+            <option value="{{ s.id }}"
+              data-price="{{ s.price }}"
+              data-type="{{ s.billing_type }}"
+              data-interval="{{ s.billing_interval }}">
+              {{ s.name }}
+              {% if s.billing_type == 'subscription' %}
+                — Ricorrente {{ 'mensile' if s.billing_interval == 'monthly' else ('semestrale' if s.billing_interval == 'semiannual' else 'annuale') }}
+              {% else %}
+                — Una tantum
+              {% endif %}
+              ({{ fmt_money(s.price) }})
+            </option>
             {% endfor %}
           </select>
-          <button type="button" class="btn btn-sm btn-outline" id="serviceAddBtn">+ Aggiungi</button>
+          <button type="button" class="btn btn-sm btn-outline" id="serviceAddBtn">Aggiungi</button>
         </div>
-        <div id="serviceList" style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px;">
-          <!-- populated by JS -->
-        </div>
+        <div id="serviceList" style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px;"></div>
+        <div id="renewalPreview" style="display:none;margin-bottom:8px;padding:10px 14px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;font-size:.88rem;color:#166534;"></div>
         <div id="serviceHidden">
-          {% if job %}
-            {% for s in job.services %}
-            <input type="hidden" name="service_ids" value="{{ s.id }}" />
-            {% endfor %}
-          {% endif %}
+          {% if job %}{% for s in job.services %}
+          <input type="hidden" name="service_ids" value="{{ s.id }}" />
+          {% endfor %}{% endif %}
         </div>
       </div>
+
+      <!-- Pannello crea nuovo servizio -->
+      <div id="newServicePanel" style="display:none;background:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;padding:16px;margin-bottom:12px;">
+        <div style="font-weight:600;font-size:.9rem;margin-bottom:12px;">Nuovo servizio</div>
+        <div class="form-grid">
+          <div class="form-group full-width" style="position:relative;">
+            <label>Nome servizio *</label>
+            <input type="text" id="newSvcName" autocomplete="off" placeholder="Es: Gestione SEO Annuale" oninput="searchServices(this.value)" />
+            <div id="svcSuggestions" style="display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid #e5e7eb;border-radius:8px;z-index:100;max-height:180px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.08);"></div>
+          </div>
+          <div class="form-group">
+            <label>Prezzo (€)</label>
+            <input type="number" id="newSvcPrice" step="0.01" min="0" value="0" />
+          </div>
+          <div class="form-group">
+            <label>Tipo</label>
+            <select id="newSvcType" onchange="toggleNewInterval()">
+              <option value="one_time">Una tantum</option>
+              <option value="subscription">Ricorrente</option>
+            </select>
+          </div>
+          <div class="form-group" id="newSvcIntervalGroup" style="display:none;">
+            <label>Ricorrenza</label>
+            <select id="newSvcInterval">
+              <option value="annual">Annuale</option>
+              <option value="semiannual">Semestrale</option>
+              <option value="monthly">Mensile</option>
+            </select>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:8px;">
+          <button type="button" class="btn btn-sm" id="saveNewSvcBtn">Salva e aggiungi</button>
+          <button type="button" class="btn btn-sm btn-outline" id="cancelNewSvcBtn">Annulla</button>
+        </div>
+        <div id="newSvcError" style="color:#dc2626;font-size:.85rem;margin-top:6px;display:none;"></div>
+      </div>
+
       <div class="form-group" style="max-width:200px;">
         <label>Importo totale (€)</label>
         <input type="number" name="amount" id="amountInput" step="0.01" min="0"
@@ -106,21 +156,27 @@
 
 <script>
 (function () {
-  const servicesData = [{% for s in services %}{"id":{{ s.id }},"name":{{ s.name|tojson }},"price":{{ s.price|float }}}{% if not loop.last %},{% endif %}{% endfor %}];
+  let servicesData = [{% for s in services %}{"id":{{ s.id }},"name":{{ s.name|tojson }},"price":{{ s.price|float }},"type":{{ s.billing_type|tojson }},"interval":{{ s.billing_interval|tojson }}}{% if not loop.last %},{% endif %}{% endfor %}];
   const picker = document.getElementById('servicePicker');
   const addBtn = document.getElementById('serviceAddBtn');
   const listEl = document.getElementById('serviceList');
   const hiddenEl = document.getElementById('serviceHidden');
   const amountInput = document.getElementById('amountInput');
 
-  // Collect pre-selected IDs from hidden inputs
   let selected = Array.from(hiddenEl.querySelectorAll('input[type=hidden]')).map(i => Number(i.value));
+
+  function serviceLabel(s) {
+    let tag = s.type === 'subscription'
+      ? ('Ricorrente ' + (s.interval === 'monthly' ? 'mensile' : s.interval === 'semiannual' ? 'semestrale' : 'annuale'))
+      : 'Una tantum';
+    return s.name + ' — ' + tag + ' (' + formatMoney(s.price) + ')';
+  }
 
   function renderList() {
     listEl.innerHTML = selected.length
       ? selected.map(id => {
           const s = servicesData.find(x => x.id === id);
-          const label = s ? (s.name + ' (' + formatMoney(s.price) + ')') : ('Servizio #' + id);
+          const label = s ? serviceLabel(s) : ('Servizio #' + id);
           return '<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:#f9fcfa;border:1px solid #dce6df;border-radius:8px;">'
             + '<span style="flex:1">' + esc(label) + '</span>'
             + '<button type="button" class="btn-xs btn-danger" data-id="' + id + '">Rimuovi</button>'
@@ -130,6 +186,27 @@
 
     hiddenEl.innerHTML = selected.map(id => '<input type="hidden" name="service_ids" value="' + id + '" />').join('');
 
+    // Renewal preview for subscription services
+    const previewEl = document.getElementById('renewalPreview');
+    const startInput = document.querySelector('input[name="start_date"]');
+    const startVal = startInput && startInput.value ? new Date(startInput.value) : new Date();
+    const recurringSvcs = selected.map(id => servicesData.find(x => x.id === id)).filter(s => s && s.type === 'subscription');
+    if (recurringSvcs.length) {
+      const lines = recurringSvcs.map(s => {
+        const renewal = new Date(startVal);
+        if (s.interval === 'monthly') renewal.setMonth(renewal.getMonth() + 1);
+        else if (s.interval === 'semiannual') renewal.setMonth(renewal.getMonth() + 6);
+        else renewal.setFullYear(renewal.getFullYear() + 1);
+        const fmt = d => d.toLocaleDateString('it-IT', {day:'2-digit',month:'2-digit',year:'numeric'});
+        const label = s.interval === 'monthly' ? '1 mese' : s.interval === 'semiannual' ? '6 mesi' : '1 anno';
+        return '📅 <strong>' + esc(s.name) + '</strong>: abbonamento ' + label + ' — primo rinnovo il <strong>' + fmt(renewal) + '</strong> (a partire dal ' + fmt(startVal) + ')';
+      });
+      previewEl.innerHTML = lines.join('<br>');
+      previewEl.style.display = 'block';
+    } else {
+      previewEl.style.display = 'none';
+    }
+
     const total = selected.reduce((sum, id) => {
       const s = servicesData.find(x => x.id === id);
       return sum + (s ? Number(s.price || 0) : 0);
@@ -138,8 +215,7 @@
 
     listEl.querySelectorAll('button[data-id]').forEach(btn => {
       btn.addEventListener('click', () => {
-        const id = Number(btn.getAttribute('data-id'));
-        selected = selected.filter(x => x !== id);
+        selected = selected.filter(x => x !== Number(btn.getAttribute('data-id')));
         renderList();
       });
     });
@@ -152,12 +228,90 @@
     renderList();
   });
 
-  function esc(v) {
-    return String(v || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-  }
-  function formatMoney(v) {
-    return '€ ' + Number(v || 0).toFixed(2).replace('.', ',');
-  }
+  // --- Nuovo servizio ---
+  document.getElementById('toggleNewService').addEventListener('click', () => {
+    const p = document.getElementById('newServicePanel');
+    p.style.display = p.style.display === 'none' ? 'block' : 'none';
+  });
+  document.getElementById('cancelNewSvcBtn').addEventListener('click', () => {
+    document.getElementById('newServicePanel').style.display = 'none';
+  });
+
+  window.toggleNewInterval = function() {
+    const t = document.getElementById('newSvcType').value;
+    document.getElementById('newSvcIntervalGroup').style.display = t === 'subscription' ? '' : 'none';
+  };
+
+  // Live search while typing
+  let searchTimer;
+  window.searchServices = function(q) {
+    clearTimeout(searchTimer);
+    const box = document.getElementById('svcSuggestions');
+    if (!q.trim()) { box.style.display = 'none'; return; }
+    searchTimer = setTimeout(() => {
+      const matches = servicesData.filter(s => s.name.toLowerCase().includes(q.toLowerCase()));
+      if (!matches.length) { box.style.display = 'none'; return; }
+      box.innerHTML = matches.map(s =>
+        '<div style="padding:8px 12px;cursor:pointer;font-size:.88rem;border-bottom:1px solid #f3f4f6;" data-id="' + s.id + '" data-name="' + esc(s.name) + '">'
+        + '<strong>' + esc(s.name) + '</strong> <span style="color:#6b7280">— ' + (s.type === 'subscription' ? 'Ricorrente' : 'Una tantum') + ' ' + formatMoney(s.price) + '</span>'
+        + '</div>'
+      ).join('');
+      box.style.display = 'block';
+      box.querySelectorAll('div[data-id]').forEach(el => {
+        el.addEventListener('mousedown', () => {
+          const id = Number(el.getAttribute('data-id'));
+          if (!selected.includes(id)) { selected.push(id); renderList(); }
+          document.getElementById('newSvcName').value = '';
+          box.style.display = 'none';
+          document.getElementById('newServicePanel').style.display = 'none';
+        });
+      });
+    }, 200);
+  };
+
+  document.getElementById('newSvcName').addEventListener('blur', () => {
+    setTimeout(() => { document.getElementById('svcSuggestions').style.display = 'none'; }, 200);
+  });
+
+  // Save new service
+  document.getElementById('saveNewSvcBtn').addEventListener('click', () => {
+    const name = document.getElementById('newSvcName').value.trim();
+    const price = document.getElementById('newSvcPrice').value || '0';
+    const type = document.getElementById('newSvcType').value;
+    const interval = document.getElementById('newSvcInterval').value;
+    const errEl = document.getElementById('newSvcError');
+    if (!name) { errEl.textContent = 'Il nome è obbligatorio.'; errEl.style.display = ''; return; }
+    errEl.style.display = 'none';
+    fetch('/gestionale/servizi/crea-inline', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name, price, billing_type: type, billing_interval: interval})
+    })
+    .then(r => r.json())
+    .then(data => {
+      if (data.error) { errEl.textContent = data.error; errEl.style.display = ''; return; }
+      // Add to local data and picker
+      servicesData.push({id: data.id, name: data.name, price: data.price, type: data.billing_type, interval: data.billing_interval});
+      const opt = document.createElement('option');
+      opt.value = data.id;
+      opt.dataset.price = data.price;
+      opt.textContent = data.name + ' — ' + (data.billing_type === 'subscription' ? 'Ricorrente ' + (data.billing_interval === 'monthly' ? 'mensile' : data.billing_interval === 'semiannual' ? 'semestrale' : 'annuale') : 'Una tantum') + ' (' + formatMoney(data.price) + ')';
+      picker.appendChild(opt);
+      selected.push(data.id);
+      renderList();
+      document.getElementById('newSvcName').value = '';
+      document.getElementById('newSvcPrice').value = '0';
+      document.getElementById('newServicePanel').style.display = 'none';
+    })
+    .catch(() => { errEl.textContent = 'Errore durante il salvataggio.'; errEl.style.display = ''; });
+  });
+
+  // Re-render preview when start_date changes
+  const startDateInput = document.querySelector('input[name="start_date"]');
+  if (startDateInput) startDateInput.addEventListener('change', renderList);
+
+  function esc(v) { return String(v||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function formatMoney(v) { return '€ ' + Number(v||0).toFixed(2).replace('.',','); }
 
   renderList();
 })();

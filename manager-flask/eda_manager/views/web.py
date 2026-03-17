@@ -103,7 +103,8 @@ def dev_login():
         "exp": int(time.time()) + 8 * 3600,
     }
     token = jwt.encode(payload, current_app.config["EDA_SSO_SECRET"], algorithm="HS256")
-    next_path = "/gestionale" if role == "administrator" else "/areapersonale"
+    default_next = "/gestionale" if role == "administrator" else "/areapersonale"
+    next_path = sanitize_next(request.args.get("next"), fallback=default_next)
     resp = make_response(redirect(next_path))
     resp.set_cookie(
         current_app.config["SESSION_COOKIE"],
@@ -225,6 +226,28 @@ def customer_detail(customer_id: int):
     )
 
 
+@bp.get("/gestionale/clienti/<int:customer_id>/anteprima-area")
+@require_admin
+def customer_area_preview(customer_id: int):
+    """Admin preview: renders the customer's personal area as they would see it."""
+    from ..models import Customer as _C
+    customer = db.session.get(_C, customer_id)
+    if not customer:
+        return "Cliente non trovato", 404
+    from ..services.query import customer_area_data
+    data = customer_area_data(customer.wp_user_id or 0, customer.email) or {}
+    return render_template(
+        "areapersonale.html",
+        title=f"Anteprima area personale — {customer.company or customer.email}",
+        customer=data.get("customer"),
+        subscriptions=data.get("subscriptions", []),
+        open_debts=data.get("open_debts", []),
+        upcoming_renewals=data.get("upcoming_renewals", []),
+        user={"email": customer.email},
+        is_admin_preview=True,
+    )
+
+
 @bp.post("/gestionale/clienti/<int:customer_id>/invita")
 @require_admin
 def customer_invite(customer_id: int):
@@ -338,7 +361,10 @@ def debts_payment_new(debt_id: int):
     # Determine redirect: back to customer detail if referrer contains /clienti/
     ref = request.referrer or ""
     if "/gestionale/clienti/" in ref:
-        return redirect(ref)
+        import re
+        m = re.search(r"/gestionale/clienti/(\d+)", ref)
+        if m:
+            return redirect(f"/gestionale/clienti/{m.group(1)}#sec-debiti")
     return redirect("/gestionale/debiti")
 
 
@@ -366,70 +392,6 @@ def subscriptions_table():
     rows = subscriptions_query(status=status)
     return render_template("partials/subscriptions_table.html", rows=rows)
 
-
-@bp.get("/gestionale/abbonamenti/nuovo")
-@require_admin
-def subscription_new_page():
-    services = get_all_services()
-    customers = customers_query(q="", status="active") + customers_query(q="", status="lead")
-    preselect_customer = request.args.get("customer_id", "")
-    return render_template(
-        "subscription_form.html",
-        title=current_app.config["APP_TITLE"],
-        services=services,
-        customers=customers,
-        sub=None,
-        preselect_customer=preselect_customer,
-    )
-
-
-@bp.post("/gestionale/abbonamenti/nuovo")
-@require_admin
-def subscription_new_submit():
-    customer_id = int(request.form.get("customer_id") or 0)
-    service_id = int(request.form.get("service_id") or 0)
-    purchase_date = parse_date(request.form.get("purchase_date"))
-    renewal_date = parse_date(request.form.get("renewal_date"))
-    billing_type = request.form.get("billing_type", "subscription")
-    billing_interval = request.form.get("billing_interval", "annual")
-    price_at_sale = parse_decimal(request.form.get("price_at_sale") or 0)
-    notes = (request.form.get("notes") or "").strip()
-    job_id = request.form.get("job_id") or None
-    create_debt = request.form.get("create_debt") == "1"
-
-    if not customer_id or not service_id or not purchase_date:
-        services = get_all_services()
-        customers = customers_query(q="", status="active") + customers_query(q="", status="lead")
-        return render_template(
-            "subscription_form.html",
-            title=current_app.config["APP_TITLE"],
-            services=services,
-            customers=customers,
-            sub=None,
-            error="Cliente, servizio e data acquisto sono obbligatori.",
-        )
-
-    sub = Subscription(
-        customer_id=customer_id,
-        service_id=service_id,
-        job_id=int(job_id) if job_id else None,
-        purchase_date=purchase_date,
-        renewal_date=renewal_date,
-        billing_type=billing_type,
-        billing_interval=billing_interval,
-        price_at_sale=price_at_sale,
-        notes=notes,
-        status="active",
-    )
-    db.session.add(sub)
-    db.session.flush()  # get sub.id
-
-    # Optionally create the first DebtItem
-    if create_debt and billing_type == "subscription" and renewal_date:
-        upsert_debt_from_subscription(sub)
-
-    db.session.commit()
-    return redirect(f"/gestionale/clienti/{customer_id}")
 
 
 @bp.get("/gestionale/abbonamenti/<int:sub_id>/modifica")
@@ -465,7 +427,7 @@ def subscription_edit_submit(sub_id: int):
     sub.notes = (request.form.get("notes") or "").strip()
     sub.status = request.form.get("status") or sub.status
     db.session.commit()
-    return redirect(f"/gestionale/clienti/{sub.customer_id}")
+    return redirect(f"/gestionale/clienti/{sub.customer_id}#sec-abbonamenti")
 
 
 @bp.post("/gestionale/abbonamenti/<int:sub_id>/cancella")
@@ -477,7 +439,7 @@ def subscription_cancel(sub_id: int):
     customer_id = sub.customer_id
     sub.status = "cancelled"
     db.session.commit()
-    return redirect(f"/gestionale/clienti/{customer_id}")
+    return redirect(f"/gestionale/clienti/{customer_id}#sec-abbonamenti")
 
 
 # ---------------------------------------------------------------------------
@@ -487,21 +449,21 @@ def subscription_cancel(sub_id: int):
 @bp.get("/gestionale/rinnovi")
 @require_admin
 def renewals_page():
-    months = int(request.args.get("months", 3))
-    rows = renewals_query(months_ahead=months)
+    payment = request.args.get("payment", "pending")
+    rows = renewals_query(payment=payment)
     return render_template(
         "renewals.html",
         title=current_app.config["APP_TITLE"],
         rows=rows,
-        months=months,
+        payment=payment,
     )
 
 
 @bp.get("/gestionale/rinnovi/table")
 @require_admin
 def renewals_table():
-    months = int(request.args.get("months", 3))
-    rows = renewals_query(months_ahead=months)
+    payment = request.args.get("payment", "pending")
+    rows = renewals_query(payment=payment)
     return render_template("partials/renewals_table.html", rows=rows)
 
 
@@ -510,6 +472,92 @@ def renewals_table():
 def renewals_process():
     created = process_renewals()
     return render_template("partials/renewals_processed.html", created=created)
+
+
+@bp.post("/gestionale/rinnovi/<int:sub_id>/paga")
+@require_admin
+def renewal_pay(sub_id: int):
+    from datetime import date as _date
+    sub = db.session.get(Subscription, sub_id)
+    if not sub:
+        rows = renewals_query(payment="pending")
+        return render_template("partials/renewals_table.html", rows=rows, flash_error="Abbonamento non trovato")
+
+    from ..services.query import upsert_debt_from_subscription
+    debt = upsert_debt_from_subscription(sub)
+    db.session.flush()
+
+    if debt is None:
+        rows = renewals_query(payment="pending")
+        return render_template("partials/renewals_table.html", rows=rows, flash_error="Nessun debito generabile")
+
+    result = add_payment(
+        debt_id=debt.id,
+        amount=float(debt.amount_total),
+        payment_date=_date.today(),
+    )
+    if "error" in result:
+        rows = renewals_query(payment="pending")
+        return render_template("partials/renewals_table.html", rows=rows, flash_error=result["error"])
+
+    next_url = request.args.get("next") or request.form.get("next")
+    if next_url:
+        from urllib.parse import urlparse
+        # Only allow relative redirects for safety
+        parsed = urlparse(next_url)
+        if not parsed.netloc:
+            from flask import redirect
+            return redirect(next_url)
+
+    rows = renewals_query(payment="pending")
+    return render_template("partials/renewals_table.html", rows=rows)
+
+
+@bp.post("/gestionale/rinnovi/<int:sub_id>/notifica")
+@require_admin
+def renewal_notify(sub_id: int):
+    sub = db.session.get(Subscription, sub_id)
+    if not sub:
+        return render_template("partials/notify_result.html", error="Abbonamento non trovato")
+
+    customer = db.session.get(Customer, sub.customer_id)
+    if not customer or not customer.email:
+        return render_template("partials/notify_result.html", error="Cliente senza indirizzo email")
+
+    service = db.session.get(Service, sub.service_id)
+    service_name = service.name if service else "-"
+
+    from ..services.query import BILLING_INTERVAL_LABELS, enum_value, parse_decimal
+    interval_label = BILLING_INTERVAL_LABELS.get(enum_value(sub.billing_interval), "-")
+
+    subject = f"Promemoria rinnovo: {service_name}"
+    body_html = render_template(
+        "email/renewal_reminder.html",
+        customer=customer,
+        service_name=service_name,
+        renewal_date=sub.renewal_date,
+        price=parse_decimal(sub.price_at_sale),
+        interval_label=interval_label,
+        app_base_url=current_app.config.get("APP_BASE_URL", ""),
+    )
+
+    try:
+        sender = (
+            current_app.config.get("MAIL_DEFAULT_SENDER")
+            or current_app.config.get("MAIL_USERNAME")
+            or "noreply@easydigital.it"
+        )
+        msg = Message(
+            subject=subject,
+            sender=sender,
+            recipients=[customer.email],
+            html=body_html,
+        )
+        mail.send(msg)
+        suppressed = current_app.config.get("MAIL_SUPPRESS_SEND", False)
+        return render_template("partials/notify_result.html", success=True, email=customer.email, suppressed=suppressed)
+    except Exception as e:
+        return render_template("partials/notify_result.html", error=str(e))
 
 
 # ---------------------------------------------------------------------------
@@ -714,7 +762,7 @@ def customer_edit_submit(customer_id: int):
     updated = update_customer(customer_id, request.form)
     if not updated:
         return "Cliente non trovato", 404
-    return redirect(f"/gestionale/clienti/{customer_id}")
+    return redirect(f"/gestionale/clienti/{customer_id}#sec-modifica")
 
 
 @bp.post("/gestionale/clienti/<int:customer_id>/elimina")
@@ -888,6 +936,29 @@ def service_new_submit():
         return redirect("/gestionale/servizi")
     create_service(request.form)
     return redirect("/gestionale/servizi")
+
+
+@bp.post("/gestionale/servizi/crea-inline")
+@require_admin
+def service_create_inline():
+    """JSON endpoint: create a service and return it for the job form picker."""
+    data = request.get_json(silent=True) or {}
+    name = (data.get("name") or "").strip()
+    if not name:
+        return {"error": "Il nome è obbligatorio."}, 400
+    from sqlalchemy.exc import IntegrityError as _IE
+    try:
+        svc = create_service(data)
+    except _IE:
+        db.session.rollback()
+        return {"error": "Servizio già esistente con questo nome."}, 400
+    return {
+        "id": svc.id,
+        "name": svc.name,
+        "price": float(svc.price),
+        "billing_type": svc.billing_type,
+        "billing_interval": svc.billing_interval,
+    }
 
 
 @bp.post("/gestionale/servizi/<int:service_id>/prezzo")

@@ -134,18 +134,30 @@ def upsert_debt_from_job(job: Job) -> None:
 
 
 def upsert_debt_from_subscription(sub: "Subscription") -> Optional[DebtItem]:
-    """Create a new DebtItem for a subscription renewal cycle, if one doesn't already exist open."""
+    """Create or reopen the DebtItem for the current subscription cycle."""
     if sub.billing_type != BillingType.SUBSCRIPTION.value:
         return None
-    # Don't create if there's already an open debt for this subscription
-    existing = DebtItem.query.filter_by(
-        source_type="subscription", source_id=sub.id, status="open"
-    ).first()
-    if existing:
-        return existing
 
     service_name = sub.service.name if sub.service else f"Servizio #{sub.service_id}"
     label = f"Rinnovo {service_name} — {format_date_it(sub.renewal_date)}"
+
+    # There can be only one DebtItem per subscription (UNIQUE constraint on source_type+source_id).
+    # Reuse it across cycles: reset to open with updated amounts/label/due_date.
+    existing = DebtItem.query.filter_by(
+        source_type="subscription", source_id=sub.id
+    ).first()
+
+    if existing:
+        if existing.status == "open":
+            return existing
+        # Reopen for the new cycle
+        existing.label = label
+        existing.due_date = sub.renewal_date
+        existing.amount_total = parse_decimal(sub.price_at_sale)
+        existing.amount_paid = Decimal("0")
+        existing.status = "open"
+        existing.customer_id = sub.customer_id
+        return existing
 
     debt = DebtItem(
         customer_id=sub.customer_id,
@@ -205,18 +217,16 @@ def process_renewals() -> list[str]:
     return created
 
 
-def renewals_query(months_ahead: int = 2) -> list[dict[str, Any]]:
-    """Return upcoming subscription renewals ordered by renewal_date."""
-    today = date.today()
-    cutoff = today + relativedelta(months=months_ahead)
+def renewals_query(payment: str = "pending") -> list[dict[str, Any]]:
+    """Return all active subscription renewals ordered by renewal_date.
 
+    payment: 'pending' (default) | 'paid' | '' (all)
+    """
     subs = (
         Subscription.query
         .filter(
             Subscription.billing_type == BillingType.SUBSCRIPTION.value,
             Subscription.status == "active",
-            Subscription.renewal_date >= today,
-            Subscription.renewal_date <= cutoff,
         )
         .order_by(Subscription.renewal_date.asc())
         .all()
@@ -233,14 +243,19 @@ def renewals_query(months_ahead: int = 2) -> list[dict[str, Any]]:
             source_type="subscription", source_id=sub.id, status="open"
         ).first()
         outstanding = debt_outstanding(open_debt.amount_total, open_debt.amount_paid) if open_debt else Decimal("0")
-        payment_status = "paid" if (open_debt is None or outstanding <= Decimal("0.01")) else "pending"
+        payment_status = "paid" if (open_debt is not None and outstanding <= Decimal("0.01")) else "pending"
+
+        if payment and payment_status != payment:
+            continue
 
         rows.append({
             "sub_id": sub.id,
             "customer_id": sub.customer_id,
             "customer_name": customer_name,
+            "customer_email": customer.email if customer else "",
             "service_name": service_name,
             "renewal_date": sub.renewal_date,
+            "renewal_year": sub.renewal_date.year if sub.renewal_date else 0,
             "billing_interval": sub.billing_interval,
             "interval_label": BILLING_INTERVAL_LABELS.get(enum_value(sub.billing_interval), "-"),
             "price": parse_decimal(sub.price_at_sale),
@@ -274,7 +289,7 @@ def dashboard_renewals_widget() -> list[dict[str, Any]]:
             source_type="subscription", source_id=sub.id, status="open"
         ).first()
         outstanding = debt_outstanding(open_debt.amount_total, open_debt.amount_paid) if open_debt else Decimal("0")
-        payment_status = "paid" if (open_debt is None or outstanding <= Decimal("0.01")) else "pending"
+        payment_status = "paid" if (open_debt is not None and outstanding <= Decimal("0.01")) else "pending"
 
         rows.append({
             "sub_id": sub.id,
@@ -316,7 +331,7 @@ def dashboard_data() -> dict[str, Any]:
     renewals_widget = dashboard_renewals_widget()
 
     jobs = jobs_query(q="", status="", limit=10)
-    debts = debt_rows_query(limit=10)
+    debts = debt_rows_query(payment="pending", limit=10)
     customers = customers_query(q="", status="", limit=8)
     tickets = tickets_query(q="", status="", limit=8)
 
@@ -396,6 +411,7 @@ def customer_detail_data(customer_id: int) -> Optional[dict[str, Any]]:
             "debt_id": d.id,
             "label": d.label,
             "source_type": d.source_type,
+            "source_id": d.source_id,
             "due_date": d.due_date,
             "amount_total": parse_decimal(d.amount_total),
             "amount_paid": parse_decimal(d.amount_paid),
@@ -637,7 +653,7 @@ def subscriptions_query(
             source_type="subscription", source_id=sub.id, status="open"
         ).first()
         outstanding = debt_outstanding(open_debt.amount_total, open_debt.amount_paid) if open_debt else Decimal("0")
-        payment_status = "paid" if (open_debt is None or outstanding <= Decimal("0.01")) else "pending"
+        payment_status = "paid" if (open_debt is not None and outstanding <= Decimal("0.01")) else "pending"
 
         rows.append({
             "sub_id": sub.id,
@@ -937,6 +953,51 @@ def add_customer_note(customer_id: int, text: str) -> Optional[CustomerNote]:
 # Job CRUD
 # ---------------------------------------------------------------------------
 
+def _sync_subscriptions_for_job(job: Job, service_ids: list[int]) -> None:
+    """Auto-create/cancel Subscription records based on recurring services on a job."""
+    start = job.start_date or date.today()
+
+    # Services in this job that are recurring
+    recurring_services = (
+        Service.query
+        .filter(Service.id.in_(service_ids), Service.billing_type == BillingType.SUBSCRIPTION.value)
+        .all()
+    ) if service_ids else []
+    recurring_ids = {s.id for s in recurring_services}
+
+    # Cancel subscriptions for services removed from this job
+    existing_subs = Subscription.query.filter_by(job_id=job.id).all()
+    for sub in existing_subs:
+        if sub.service_id not in recurring_ids:
+            sub.status = "cancelled"
+
+    # Create or reactivate subscriptions for recurring services
+    for svc in recurring_services:
+        existing = Subscription.query.filter_by(job_id=job.id, service_id=svc.id).first()
+        if existing:
+            existing.status = "active"
+            existing.customer_id = job.customer_id
+        else:
+            interval = enum_value(svc.billing_interval)
+            if interval == BillingInterval.MONTHLY.value:
+                renewal = start + relativedelta(months=1)
+            elif interval == BillingInterval.SEMIANNUAL.value:
+                renewal = start + relativedelta(months=6)
+            else:
+                renewal = start + relativedelta(years=1)
+            sub = Subscription(
+                customer_id=job.customer_id,
+                job_id=job.id,
+                service_id=svc.id,
+                purchase_date=start,
+                renewal_date=renewal,
+                billing_type=BillingType.SUBSCRIPTION.value,
+                billing_interval=enum_value(svc.billing_interval),
+                price_at_sale=parse_decimal(svc.price),
+                status="active",
+            )
+            db.session.add(sub)
+
 def job_detail_data(job_id: int) -> Optional[dict]:
     job = db.session.get(Job, job_id)
     if not job:
@@ -1006,6 +1067,7 @@ def create_job(form_data: dict) -> Job:
         js = JobService(job_id=job.id, service_id=sid)
         db.session.add(js)
 
+    _sync_subscriptions_for_job(job, service_ids)
     upsert_debt_from_job(job)
     db.session.commit()
     return job
@@ -1042,6 +1104,8 @@ def update_job(job_id: int, form_data: dict) -> Optional[Job]:
         for sid in service_ids:
             js = JobService(job_id=job_id, service_id=sid)
             db.session.add(js)
+
+        _sync_subscriptions_for_job(job, service_ids)
     else:
         amount_raw = form_data.get("amount")
         if amount_raw is not None:

@@ -8,7 +8,7 @@
   </div>
   <div class="header-actions">
     <a href="/gestionale/lavori/nuovo?customer_id={{ customer.id }}" class="btn btn-sm">+ Nuovo lavoro</a>
-    <a href="/gestionale/abbonamenti/nuovo?customer_id={{ customer.id }}" class="btn btn-sm btn-outline">+ Abbonamento</a>
+    <a href="/gestionale/clienti/{{ customer.id }}/anteprima-area" target="_blank" class="btn btn-sm btn-outline" title="Vedi cosa vede il cliente nella sua area personale">👁 Anteprima area cliente</a>
     <button class="btn btn-sm btn-outline"
       hx-post="/gestionale/clienti/{{ customer.id }}/invita"
       hx-target="#invite-area"
@@ -147,30 +147,64 @@
 <section id="sec-abbonamenti" class="card tab-section">
   <div class="section-header">
     <h2>Abbonamenti</h2>
-    <a href="/gestionale/abbonamenti/nuovo?customer_id={{ customer.id }}" class="btn btn-sm">+ Nuovo</a>
   </div>
   {% if subscriptions %}
-  <table class="tbl">
-    <thead><tr><th>Servizio</th><th>Ricorrenza</th><th>Prossimo rinnovo</th><th>Importo</th><th>Stato</th><th></th></tr></thead>
-    <tbody>
-      {% for s in subscriptions %}
-      <tr>
-        <td>{{ s.service.name if s.service else '-' }}</td>
-        <td>{{ BILLING_INTERVAL_LABELS.get(s.billing_interval, s.billing_interval) if s.billing_type == 'subscription' else 'Una tantum' }}</td>
-        <td>{{ fmt_date(s.renewal_date) }}</td>
-        <td>{{ fmt_money(s.price_at_sale) }}</td>
-        <td><span class="badge badge-{{ s.status }}">{{ s.status }}</span></td>
-        <td>
-          <a href="/gestionale/abbonamenti/{{ s.id }}/modifica" class="btn-xs btn-outline">Modifica</a>
-          <form style="display:inline" method="POST" action="/gestionale/abbonamenti/{{ s.id }}/cancella"
-            onsubmit="return confirm('Annullare questo abbonamento?')">
-            <button type="submit" class="btn-xs btn-danger">Annulla</button>
-          </form>
-        </td>
-      </tr>
-      {% endfor %}
-    </tbody>
+  {% set annual_subs = subscriptions | selectattr('billing_interval', 'in', ['annual', 'semiannual']) | list %}
+  {% set monthly_subs = subscriptions | selectattr('billing_interval', 'equalto', 'monthly') | list %}
+
+  {% macro sub_rows(items) %}
+  {% set ns = namespace(current_year=0) %}
+  {% for s in items %}
+    {% set sub_debt = open_debts | selectattr('source_type', 'equalto', 'subscription') | selectattr('source_id', 'equalto', s.id) | list | first | default(none) %}
+    {% set is_paid = sub_debt is not none and sub_debt.outstanding <= 0.01 %}
+    {% if s.renewal_date and s.renewal_date.year != ns.current_year %}
+      {% set ns.current_year = s.renewal_date.year %}
+      <tr class="year-separator"><td colspan="5">{{ ns.current_year }}</td></tr>
+    {% endif %}
+    <tr>
+      <td>{{ s.service.name if s.service else '-' }}</td>
+      <td>{{ fmt_date(s.renewal_date) }}</td>
+      <td>{{ fmt_money(s.price_at_sale) }}</td>
+      <td>
+        {% if is_paid %}<span class="badge badge-paid">Pagato</span>
+        {% else %}<span class="badge badge-pending">Da pagare</span>{% endif %}
+      </td>
+      <td style="white-space:nowrap;">
+        {% if not is_paid and s.status == 'active' %}
+        <form style="display:inline" method="POST"
+          action="/gestionale/rinnovi/{{ s.id }}/paga?next=/gestionale/clienti/{{ customer.id }}%23sec-abbonamenti"
+          data-cliente="{{ customer.company or (customer.first_name ~ ' ' ~ customer.last_name) }}"
+          onsubmit="event.preventDefault(); openSubPayModal(this, '{{ (s.service.name if s.service else '') | e }}', '{{ fmt_money(s.price_at_sale) }}')">
+          <button type="submit" class="btn-xs">Segna pagato</button>
+        </form>
+        {% endif %}
+        <span class="badge badge-{{ s.status }}" style="font-size:.72rem;">{{ s.status }}</span>
+        {% if s.status == 'active' %}
+        <form style="display:inline" method="POST" action="/gestionale/abbonamenti/{{ s.id }}/cancella"
+          onsubmit="return confirm('Annullare questo abbonamento?')">
+          <button type="submit" class="btn-xs btn-danger">Annulla</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+  {% endfor %}
+  {% endmacro %}
+
+  {% if annual_subs %}
+  <h3 style="margin:0 0 10px;font-size:.95rem;font-weight:700;">Annuali / Semestrali</h3>
+  <table class="tbl" style="margin-bottom:24px;">
+    <thead><tr><th>Servizio</th><th>Prossimo rinnovo</th><th>Importo</th><th>Pagamento</th><th></th></tr></thead>
+    <tbody>{{ sub_rows(annual_subs) }}</tbody>
   </table>
+  {% endif %}
+
+  {% if monthly_subs %}
+  <h3 style="margin:0 0 10px;font-size:.95rem;font-weight:700;">Mensili</h3>
+  <table class="tbl">
+    <thead><tr><th>Servizio</th><th>Prossimo rinnovo</th><th>Importo</th><th>Pagamento</th><th></th></tr></thead>
+    <tbody>{{ sub_rows(monthly_subs) }}</tbody>
+  </table>
+  {% endif %}
   {% else %}
   <p class="muted">Nessun abbonamento registrato.</p>
   {% endif %}
@@ -322,25 +356,68 @@
   </form>
 </section>
 
+<div id="sub-pay-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:999;align-items:center;justify-content:center;">
+  <div style="background:#fff;border-radius:12px;padding:28px 32px;max-width:420px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,.18);">
+    <h3 style="margin:0 0 8px;">Conferma pagamento</h3>
+    <p id="sub-modal-cliente" style="margin:0 0 4px;font-weight:600;font-size:1rem;"></p>
+    <p id="sub-modal-servizio" style="margin:0 0 4px;color:#6b7280;font-size:.9rem;"></p>
+    <p id="sub-modal-importo" style="margin:0 0 20px;font-size:.9rem;"></p>
+    <p style="margin:0 0 20px;font-size:.88rem;color:#374151;">Il ciclo corrente verrà segnato come pagato e la data di rinnovo avanzerà al periodo successivo.</p>
+    <div style="display:flex;gap:10px;justify-content:flex-end;">
+      <button class="btn btn-sm btn-outline" onclick="closeSubPayModal()">Annulla</button>
+      <button class="btn btn-sm" id="sub-modal-confirm-btn" onclick="confirmSubPay()">Conferma pagamento</button>
+    </div>
+  </div>
+</div>
+
 <script>
-function showTab(e, id) {
-  e.preventDefault();
+function activateTab(id) {
   document.querySelectorAll('.tab-section').forEach(s => s.classList.remove('active'));
   document.querySelectorAll('.tab-link').forEach(a => a.classList.remove('active'));
-  document.getElementById(id).classList.add('active');
-  e.target.classList.add('active');
+  const section = document.getElementById(id);
+  const link = document.querySelector('.tab-link[href="#' + id + '"]');
+  if (section) section.classList.add('active');
+  if (link) link.classList.add('active');
+}
+function showTab(e, id) {
+  e.preventDefault();
+  activateTab(id);
+  history.replaceState(null, '', '#' + id);
 }
 function togglePayForm(id) {
   const el = document.getElementById('pay-form-' + id);
   el.style.display = el.style.display === 'none' ? 'block' : 'none';
 }
-// Handle hash navigation (e.g. after adding a note)
+
+// Restore active tab from hash on load
 (function() {
-  const hash = window.location.hash;
-  if (hash === '#sec-note') {
-    const link = document.querySelector('[href="#sec-note"]');
-    if (link) link.click();
+  const hash = window.location.hash.replace('#', '');
+  if (hash && document.getElementById(hash)) {
+    activateTab(hash);
   }
 })();
+
+// Subscription pay modal
+let _pendingSubForm = null;
+function openSubPayModal(formEl, servizio, importo) {
+  _pendingSubForm = formEl;
+  document.getElementById('sub-modal-cliente').textContent = formEl.dataset.cliente;
+  document.getElementById('sub-modal-servizio').textContent = servizio;
+  document.getElementById('sub-modal-importo').textContent = 'Importo: ' + importo;
+  document.getElementById('sub-pay-modal').style.display = 'flex';
+}
+function closeSubPayModal() {
+  document.getElementById('sub-pay-modal').style.display = 'none';
+  _pendingSubForm = null;
+}
+function confirmSubPay() {
+  if (!_pendingSubForm) return;
+  const form = _pendingSubForm;
+  closeSubPayModal();
+  form.submit();
+}
+document.getElementById('sub-pay-modal').addEventListener('click', function(e) {
+  if (e.target === this) closeSubPayModal();
+});
 </script>
 {% endblock %}

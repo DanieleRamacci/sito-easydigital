@@ -1,14 +1,26 @@
 {% extends "base.html" %}
 {% block content %}
+<style>
+.dash-kpi-strip { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+.dash-kpi-pill { background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 7px 14px; display: flex; align-items: center; gap: 10px; }
+.dash-kpi-pill .kv { font-size: 1.15rem; font-weight: 700; color: #166534; line-height: 1; }
+.dash-kpi-pill .kv-warn { color: #d97706; }
+.dash-kpi-pill .kv-red { color: #dc2626; }
+.dash-kpi-pill .kl { font-size: .75rem; color: #6b7280; white-space: nowrap; }
+.dash-tbl { width: 100%; border-collapse: collapse; font-size: .83rem; }
+.dash-tbl th { font-size: .73rem; color: #9ca3af; font-weight: 600; text-align: left; padding: 4px 8px 5px; border-bottom: 1px solid #f3f4f6; white-space: nowrap; }
+.dash-tbl td { padding: 6px 8px; border-bottom: 1px solid #f9fafb; vertical-align: middle; white-space: nowrap; max-width: 160px; overflow: hidden; text-overflow: ellipsis; }
+.dash-tbl tr:last-child td { border-bottom: none; }
+</style>
 <h1>Dashboard</h1>
 
-<section class="kpi-grid">
-  <article class="kpi"><div>Clienti</div><strong>{{ kpi.customers }}</strong></article>
-  <article class="kpi"><div>Lavori</div><strong>{{ kpi.jobs }}</strong></article>
-  <article class="kpi"><div>Ticket Aperti</div><strong>{{ kpi.tickets_open }}</strong></article>
-  <article class="kpi"><div>Debito Residuo</div><strong>{{ fmt_money(kpi.debt_outstanding) }}</strong></article>
-  <article class="kpi kpi-warn"><div>Rinnovi in scadenza</div><strong>{{ kpi.renewals_this_month }}</strong></article>
-</section>
+<div class="dash-kpi-strip">
+  <div class="dash-kpi-pill"><span class="kv">{{ kpi.customers }}</span><span class="kl">Clienti</span></div>
+  <div class="dash-kpi-pill"><span class="kv">{{ kpi.jobs }}</span><span class="kl">Lavori</span></div>
+  <div class="dash-kpi-pill"><span class="kv">{{ kpi.tickets_open }}</span><span class="kl">Ticket aperti</span></div>
+  <div class="dash-kpi-pill"><span class="kv {% if kpi.debt_outstanding > 0 %}kv-red{% endif %}">{{ fmt_money(kpi.debt_outstanding) }}</span><span class="kl">Debito residuo</span></div>
+  <div class="dash-kpi-pill"><span class="kv kv-warn">{{ kpi.renewals_this_month }}</span><span class="kl">Rinnovi in scadenza</span></div>
+</div>
 
 {% if notifications %}
 <section class="card">
@@ -42,20 +54,19 @@
     <h2>Rinnovi questo mese</h2>
     <a href="/gestionale/rinnovi" class="btn btn-sm">Vedi tutti</a>
   </div>
-  <table class="tbl">
-    <thead><tr><th>Cliente</th><th>Servizio</th><th>Scadenza</th><th>Importo</th><th>Stato</th></tr></thead>
+  <table class="dash-tbl">
+    <thead><tr><th>Cliente</th><th>Servizio</th><th>Scadenza</th><th>Stato</th></tr></thead>
     <tbody>
       {% for r in renewals_widget %}
       <tr class="{% if r.overdue %}row-danger{% endif %}">
         <td><a href="/gestionale/clienti/{{ r.customer_id }}">{{ r.customer_name }}</a></td>
         <td>{{ r.service_name }}</td>
-        <td>{{ fmt_date(r.renewal_date) }}{% if r.overdue %} <span class="badge badge-danger">Scaduto</span>{% endif %}</td>
-        <td>{{ fmt_money(r.price) }}</td>
+        <td>{{ fmt_date(r.renewal_date) }}{% if r.overdue %} <span class="badge badge-danger">!</span>{% endif %}</td>
         <td>
           {% if r.payment_status == 'paid' %}
             <span class="badge badge-paid">Pagato</span>
           {% else %}
-            <span class="badge badge-pending">In attesa</span>
+            <span class="badge badge-pending">Attesa</span>
           {% endif %}
         </td>
       </tr>
@@ -71,14 +82,41 @@
       <h2>Ultimi Lavori</h2>
       <a href="/gestionale/lavori" class="btn btn-sm">Tutti</a>
     </div>
-    {% include "partials/jobs_table.html" with context %}
+    {% if jobs %}
+    <table class="dash-tbl">
+      <thead><tr><th>Cliente</th><th>Titolo</th><th>Stato</th><th>Scad.</th></tr></thead>
+      <tbody>
+        {% for j in jobs %}
+        <tr>
+          <td><a href="/gestionale/clienti/{{ j.customer_id }}">{{ j.customer_name or '-' }}</a></td>
+          <td><a href="/gestionale/lavori/{{ j.id }}">{{ j.title or '-' }}</a></td>
+          <td><span class="badge badge-job-{{ j.status }}">{{ j.status_label or j.status or '-' }}</span></td>
+          <td>{{ fmt_date(j.dueDate or '') }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}<p class="muted">Nessun lavoro trovato.</p>{% endif %}
   </section>
   <section class="card">
     <div class="section-header">
       <h2>Debiti in evidenza</h2>
       <a href="/gestionale/debiti" class="btn btn-sm">Tutti</a>
     </div>
-    {% include "partials/debts_table.html" with context %}
+    {% if debts %}
+    <table class="dash-tbl">
+      <thead><tr><th>Cliente</th><th>Voce</th><th>Residuo</th></tr></thead>
+      <tbody>
+        {% for d in debts %}
+        <tr>
+          <td><a href="/gestionale/clienti/{{ d.customer_id }}">{{ d.customer_name }}</a></td>
+          <td>{{ d.item_name }}</td>
+          <td><strong class="{% if d.outstanding > 0 %}kv-red{% endif %}" style="font-size:.85rem;">{{ fmt_money(d.outstanding) }}</strong></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}<p class="muted">Nessun debito trovato.</p>{% endif %}
   </section>
 </div>
 
@@ -88,14 +126,40 @@
       <h2>Clienti recenti</h2>
       <a href="/gestionale/clienti" class="btn btn-sm">Tutti</a>
     </div>
-    {% include "partials/customers_table.html" with context %}
+    {% if customers %}
+    <table class="dash-tbl">
+      <thead><tr><th>Azienda</th><th>Email</th><th>Stato</th></tr></thead>
+      <tbody>
+        {% for c in customers %}
+        <tr>
+          <td><a href="/gestionale/clienti/{{ c.id }}">{{ c.company or (c.first_name ~ ' ' ~ c.last_name) or '-' }}</a></td>
+          <td>{{ c.email or '-' }}</td>
+          <td><span class="badge badge-status-{{ c.status }}">{{ c.status or '-' }}</span></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}<p class="muted">Nessun cliente trovato.</p>{% endif %}
   </section>
   <section class="card">
     <div class="section-header">
       <h2>Ticket recenti</h2>
       <a href="/gestionale/ticket" class="btn btn-sm">Tutti</a>
     </div>
-    {% include "partials/tickets_table.html" with context %}
+    {% if tickets %}
+    <table class="dash-tbl">
+      <thead><tr><th>Cliente</th><th>Oggetto</th><th>Stato</th></tr></thead>
+      <tbody>
+        {% for t in tickets %}
+        <tr>
+          <td>{{ t.customer_label }}</td>
+          <td>{{ t.subject or '-' }}</td>
+          <td>{{ t.status or '-' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}<p class="muted">Nessun ticket trovato.</p>{% endif %}
   </section>
 </div>
 {% endblock %}

@@ -1,0 +1,7 @@
+{% if error %}
+<span class="badge badge-danger" style="font-size:.82rem;">Errore: {{ error }}</span>
+{% elif suppressed %}
+<span class="badge" style="background:#f3f4f6;color:#6b7280;border:1px solid #dce6df;font-size:.82rem;">Dev: email soppressa ({{ email }})</span>
+{% else %}
+<span class="badge badge-paid" style="font-size:.82rem;">Email inviata a {{ email }}</span>
+{% endif %}
