@@ -51,6 +51,7 @@ def create_app(config_object=Config):
                 "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS payment_status VARCHAR DEFAULT 'pending'",
                 "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS description TEXT",
                 "ALTER TABLE customers ADD COLUMN IF NOT EXISTS fic_entity_id BIGINT",
+                "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS fic_document_id BIGINT",
             ]
             for sql in migrations:
                 try:

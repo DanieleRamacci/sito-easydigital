@@ -926,17 +926,28 @@ def job_new_submit():
 @bp.get("/gestionale/lavori/<int:job_id>")
 @require_admin
 def job_detail_page(job_id: int):
+    from ..services.fic import fic_enabled, get_document
     data = job_detail_data(job_id)
     if not data:
         return "Lavoro non trovato", 404
     services = get_all_services()
     all_customers = customers_query(q="", status="")
+
+    fic_doc = None
+    fic_doc_error = request.args.get("fic_error", "")
+    job_obj = data.get("job")
+    if fic_enabled() and job_obj and job_obj.fic_document_id:
+        fic_doc, fic_doc_error = get_document(job_obj.fic_document_id)
+
     return render_template(
         "job_detail.html",
         title=current_app.config["APP_TITLE"],
         services=services,
         customers=all_customers,
         statuses=JOB_STATUS_LABELS,
+        fic_configured=fic_enabled(),
+        fic_doc=fic_doc,
+        fic_doc_error=fic_doc_error,
         **data,
     )
 
@@ -1070,6 +1081,124 @@ def service_price_update(service_id: int):
 # ---------------------------------------------------------------------------
 # FattureInCloud integration
 # ---------------------------------------------------------------------------
+
+@bp.get("/gestionale/fic/importa-clienti")
+@require_admin
+def fic_importa_clienti_page():
+    """Page to import / link FIC clients to EDA customers."""
+    from ..services.fic import fic_enabled, fetch_all_clients
+    if not fic_enabled():
+        return redirect("/gestionale")
+
+    fic_clients, error = fetch_all_clients()
+
+    all_customers = Customer.query.all()
+    by_fic_id = {c.fic_entity_id: c for c in all_customers if c.fic_entity_id}
+    by_vat = {c.vat.strip().upper(): c for c in all_customers if c.vat and c.vat.strip()}
+    by_email = {c.email.lower(): c for c in all_customers if c.email}
+
+    rows = []
+    for fc in fic_clients:
+        fic_id = fc.get("id")
+        vat = (fc.get("vat_number") or "").strip().upper()
+        email = (fc.get("email") or "").strip().lower()
+
+        matched = None
+        match_type = None
+        if fic_id in by_fic_id:
+            matched = by_fic_id[fic_id]
+            match_type = "linked"
+        elif vat and vat in by_vat:
+            matched = by_vat[vat]
+            match_type = "vat"
+        elif email and email in by_email:
+            matched = by_email[email]
+            match_type = "email"
+
+        rows.append({"fic": fc, "customer": matched, "match_type": match_type})
+
+    return render_template("fic_importa_clienti.html", rows=rows, error=error)
+
+
+@bp.post("/gestionale/fic/importa-cliente")
+@require_admin
+def fic_importa_singolo():
+    """Import or link a single FIC client."""
+    fic_entity_id_raw = (request.form.get("fic_entity_id") or "").strip()
+    action = request.form.get("action", "import")
+    customer_id_raw = request.form.get("customer_id") or ""
+
+    try:
+        fic_entity_id = int(fic_entity_id_raw)
+    except ValueError:
+        return redirect("/gestionale/fic/importa-clienti")
+
+    if action == "link" and customer_id_raw:
+        customer = Customer.query.get(int(customer_id_raw))
+        if customer:
+            customer.fic_entity_id = fic_entity_id
+            db.session.commit()
+    elif action == "import":
+        company = (request.form.get("name") or "").strip()
+        vat = (request.form.get("vat_number") or "").strip()
+        email = (request.form.get("email") or "").strip().lower()
+        city = (request.form.get("address_city") or "").strip()
+
+        if not email:
+            email = f"fic_{fic_entity_id}@noemail.local"
+
+        existing = Customer.query.filter(
+            db.func.lower(Customer.email) == email
+        ).first()
+        if existing:
+            existing.fic_entity_id = fic_entity_id
+        else:
+            new_customer = Customer(
+                company=company or f"Cliente FIC {fic_entity_id}",
+                email=email,
+                vat=vat,
+                billing_address=city,
+                status="active",
+                fic_entity_id=fic_entity_id,
+            )
+            db.session.add(new_customer)
+        db.session.commit()
+
+    return redirect("/gestionale/fic/importa-clienti")
+
+
+@bp.post("/gestionale/lavori/<int:job_id>/fic-preventivo")
+@require_admin
+def fic_genera_preventivo(job_id: int):
+    """Create a FIC quote (preventivo) from a job and save the document ID."""
+    from ..services.fic import fic_enabled, get_vat_type_22, create_quote_from_job
+    job = Job.query.get_or_404(job_id)
+
+    if not fic_enabled():
+        return redirect(f"/gestionale/lavori/{job_id}")
+
+    vat_id, err = get_vat_type_22()
+    if err:
+        return redirect(f"/gestionale/lavori/{job_id}?fic_error={err}")
+
+    doc, err = create_quote_from_job(job, vat_id)
+    if err:
+        return redirect(f"/gestionale/lavori/{job_id}?fic_error={err}")
+
+    job.fic_document_id = doc.get("id")
+    db.session.commit()
+    return redirect(f"/gestionale/lavori/{job_id}")
+
+
+@bp.post("/gestionale/lavori/<int:job_id>/fic-scollega")
+@require_admin
+def fic_scollega_lavoro(job_id: int):
+    """Remove FIC document link from a job."""
+    job = Job.query.get_or_404(job_id)
+    job.fic_document_id = None
+    db.session.commit()
+    return redirect(f"/gestionale/lavori/{job_id}")
+
 
 @bp.get("/gestionale/clienti/<int:customer_id>/fic-fatture")
 @require_admin

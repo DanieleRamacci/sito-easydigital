@@ -114,6 +114,7 @@ class Job(TimestampMixin, db.Model):
     start_date = db.Column(db.Date)
     amount = db.Column(db.Numeric(12, 2), default=0, nullable=False)
     payment_status = db.Column(db.String(32), default="pending", nullable=False)
+    fic_document_id = db.Column(db.BigInteger)
     status = db.Column(
         db.Enum(JobStatus, values_callable=lambda x: [e.value for e in x], native_enum=False),
         default=JobStatus.QUALIFICAZIONE_PREVENTIVO.value,

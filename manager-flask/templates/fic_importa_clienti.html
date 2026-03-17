@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <a href="/gestionale" class="back-link">← Dashboard</a>
+    <h1>Importa clienti da FattureInCloud</h1>
+  </div>
+</div>
+
+{% if error %}
+<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:14px 18px;font-size:.88rem;color:#991b1b;margin-bottom:16px;">
+  {{ error }}
+</div>
+{% endif %}
+
+<div class="card" style="margin-bottom:16px;padding:14px 20px;">
+  <p style="margin:0;font-size:.9rem;color:#374151;">
+    Trovati <strong>{{ rows|length }}</strong> clienti in FattureInCloud.
+    Per ogni cliente puoi <strong>Collegare</strong> (se già esiste in EDA) o <strong>Importare</strong> (crea nuovo cliente in EDA).
+  </p>
+  <div style="display:flex;gap:10px;margin-top:10px;font-size:.82rem;">
+    <span style="display:flex;align-items:center;gap:5px;"><span style="width:10px;height:10px;border-radius:50%;background:#22c55e;display:inline-block;"></span> Già collegato</span>
+    <span style="display:flex;align-items:center;gap:5px;"><span style="width:10px;height:10px;border-radius:50%;background:#f59e0b;display:inline-block;"></span> Match trovato (P.IVA / email)</span>
+    <span style="display:flex;align-items:center;gap:5px;"><span style="width:10px;height:10px;border-radius:50%;background:#6b7280;display:inline-block;"></span> Non trovato in EDA</span>
+  </div>
+</div>
+
+<div class="card" style="padding:0;overflow:hidden;">
+  <table class="tbl" style="margin:0;">
+    <thead>
+      <tr>
+        <th style="width:14px;"></th>
+        <th>Nome / Ragione sociale (FIC)</th>
+        <th>P.IVA</th>
+        <th>Città</th>
+        <th>Cliente EDA corrispondente</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      {% set fc = row.fic %}
+      {% set customer = row.customer %}
+      {% set match = row.match_type %}
+      <tr>
+        <td>
+          {% if match == 'linked' %}
+            <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#22c55e;" title="Già collegato"></span>
+          {% elif match in ('vat', 'email') %}
+            <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#f59e0b;" title="Match per {{ match }}"></span>
+          {% else %}
+            <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#d1d5db;" title="Nessun match"></span>
+          {% endif %}
+        </td>
+        <td><strong>{{ fc.get('name', '—') }}</strong></td>
+        <td style="font-size:.83rem;color:#6b7280;">{{ fc.get('vat_number') or fc.get('tax_code') or '—' }}</td>
+        <td style="font-size:.83rem;color:#6b7280;">{{ fc.get('address_city') or '—' }}</td>
+        <td style="font-size:.85rem;">
+          {% if customer %}
+            <a href="/gestionale/clienti/{{ customer.id }}" style="color:#1f8a4c;font-weight:600;">
+              {{ customer.company or (customer.first_name ~ ' ' ~ customer.last_name) }}
+            </a>
+            {% if match == 'vat' %}<span class="muted" style="font-size:.78rem;"> (match P.IVA)</span>{% endif %}
+            {% if match == 'email' %}<span class="muted" style="font-size:.78rem;"> (match email)</span>{% endif %}
+          {% else %}
+            <span class="muted">—</span>
+          {% endif %}
+        </td>
+        <td style="white-space:nowrap;">
+          {% if match == 'linked' %}
+            <span class="badge" style="background:#dcfce7;color:#166534;padding:3px 10px;border-radius:4px;font-size:.78rem;">Collegato</span>
+          {% elif match in ('vat', 'email') %}
+            {# Link to existing customer #}
+            <form method="POST" action="/gestionale/fic/importa-cliente" style="display:inline;">
+              <input type="hidden" name="fic_entity_id" value="{{ fc.id }}" />
+              <input type="hidden" name="action" value="link" />
+              <input type="hidden" name="customer_id" value="{{ customer.id }}" />
+              <button type="submit" class="btn-xs">Collega</button>
+            </form>
+          {% else %}
+            {# Import as new customer #}
+            <form method="POST" action="/gestionale/fic/importa-cliente" style="display:inline;">
+              <input type="hidden" name="fic_entity_id" value="{{ fc.id }}" />
+              <input type="hidden" name="action" value="import" />
+              <input type="hidden" name="name" value="{{ fc.get('name', '') }}" />
+              <input type="hidden" name="vat_number" value="{{ fc.get('vat_number') or fc.get('tax_code') or '' }}" />
+              <input type="hidden" name="email" value="{{ fc.get('email') or '' }}" />
+              <input type="hidden" name="address_city" value="{{ fc.get('address_city') or '' }}" />
+              <button type="submit" class="btn-xs btn-outline">Importa</button>
+            </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+
+      {% if not rows %}
+      <tr><td colspan="6" style="text-align:center;color:#9ca3af;padding:28px;">Nessun cliente trovato in FattureInCloud.</td></tr>
+      {% endif %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}
