@@ -1082,6 +1082,34 @@ def service_price_update(service_id: int):
 # FattureInCloud integration
 # ---------------------------------------------------------------------------
 
+@bp.get("/gestionale/fic/debug-vat")
+@require_admin
+def fic_debug_vat():
+    """Diagnostic: show raw FIC vat_types and info endpoint responses."""
+    import json
+    from ..services.fic import fic_enabled, _headers, _cid, FIC_BASE
+    if not fic_enabled():
+        return "FIC non configurato", 400
+
+    results = {}
+    endpoints = [
+        ("info?type=quote", f"{FIC_BASE}/c/{_cid()}/issued_documents/info", {"type": "quote"}),
+        ("info?document_type=quote", f"{FIC_BASE}/c/{_cid()}/issued_documents/info", {"document_type": "quote"}),
+    ]
+    import requests as _req
+    for label, url, params in endpoints:
+        try:
+            r = _req.get(url, params=params, headers=_headers(), timeout=8)
+            results[label] = {"status": r.status_code, "body": r.json()}
+        except Exception as e:
+            results[label] = {"error": str(e)}
+
+    return current_app.response_class(
+        json.dumps(results, indent=2, ensure_ascii=False),
+        mimetype="application/json"
+    )
+
+
 @bp.get("/gestionale/fic/importa-clienti")
 @require_admin
 def fic_importa_clienti_page():
