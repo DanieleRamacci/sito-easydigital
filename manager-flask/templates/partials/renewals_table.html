@@ -23,9 +23,9 @@
     </td>
     <td style="white-space:nowrap;">
       <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
-        {% if r.payment_status != 'paid' %}
+        {% if r.payment_status != 'paid' and r.debt_id %}
           <button class="btn-xs"
-            onclick="openPayModal({{ r.sub_id }}, '{{ r.customer_name|e }}', '{{ r.service_name|e }}', '{{ fmt_money(r.price) }}')">
+            onclick="openPayModal({{ r.debt_id }}, '{{ r.customer_name|e }}', '{{ r.service_name|e }}', '{{ fmt_money(r.price) }}')">
             Segna pagato
           </button>
         {% else %}
@@ -37,7 +37,7 @@
             Invia notifica
           </button>
         {% endif %}
-        <span id="notify-result-{{ r.sub_id }}"></span>
+        <span id="notify-result-{{ r.debt_id or r.sub_id }}"></span>
       </div>
     </td>
   </tr>

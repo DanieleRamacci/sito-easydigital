@@ -571,22 +571,15 @@ def renewals_process():
     return render_template("partials/renewals_processed.html", created=created)
 
 
-@bp.post("/gestionale/rinnovi/<int:sub_id>/paga")
+@bp.post("/gestionale/rinnovi/debito/<int:debt_id>/paga")
 @require_admin
-def renewal_pay(sub_id: int):
+def renewal_pay(debt_id: int):
+    """Pay a single renewal DebtItem."""
     from datetime import date as _date
-    sub = db.session.get(Subscription, sub_id)
-    if not sub:
+    debt = db.session.get(DebtItem, debt_id)
+    if not debt or debt.source_type != "subscription":
         rows = renewals_query(payment="pending")
-        return render_template("partials/renewals_table.html", rows=rows, flash_error="Abbonamento non trovato")
-
-    from ..services.query import upsert_debt_from_subscription
-    debt = upsert_debt_from_subscription(sub)
-    db.session.flush()
-
-    if debt is None:
-        rows = renewals_query(payment="pending")
-        return render_template("partials/renewals_table.html", rows=rows, flash_error="Nessun debito generabile")
+        return render_template("partials/renewals_table.html", rows=rows, flash_error="Debito non trovato")
 
     result = add_payment(
         debt_id=debt.id,
@@ -600,7 +593,6 @@ def renewal_pay(sub_id: int):
     next_url = request.args.get("next") or request.form.get("next")
     if next_url:
         from urllib.parse import urlparse
-        # Only allow relative redirects for safety
         parsed = urlparse(next_url)
         if not parsed.netloc:
             from flask import redirect

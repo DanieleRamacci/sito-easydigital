@@ -23,7 +23,7 @@
     <p id="modal-servizio" style="margin:0 0 4px;color:#6b7280;font-size:.9rem;"></p>
     <p id="modal-importo" style="margin:0 0 20px;font-size:.9rem;"></p>
     <p style="margin:0 0 20px;font-size:.88rem;color:#374151;">
-      Il ciclo corrente verrà segnato come pagato e la data di rinnovo avanzerà al periodo successivo.
+      Questo periodo verrà segnato come pagato.
     </p>
     <div style="display:flex;gap:10px;justify-content:flex-end;">
       <button class="btn btn-sm btn-outline" onclick="closePayModal()">Annulla</button>
@@ -70,10 +70,10 @@
 
 <script>
 // ---- Pay modal ----
-let _pendingSubId = null;
+let _pendingDebtId = null;
 
-function openPayModal(subId, cliente, servizio, importo) {
-  _pendingSubId = subId;
+function openPayModal(debtId, cliente, servizio, importo) {
+  _pendingDebtId = debtId;
   document.getElementById('modal-cliente').textContent = cliente;
   document.getElementById('modal-servizio').textContent = servizio;
   document.getElementById('modal-importo').textContent = 'Importo: ' + importo;
@@ -83,17 +83,17 @@ function openPayModal(subId, cliente, servizio, importo) {
 
 function closePayModal() {
   document.getElementById('pay-modal').style.display = 'none';
-  _pendingSubId = null;
+  _pendingDebtId = null;
 }
 
 function confirmPay() {
-  if (!_pendingSubId) return;
-  const subId = _pendingSubId;
+  if (!_pendingDebtId) return;
+  const debtId = _pendingDebtId;
   const btn = document.getElementById('modal-confirm-btn');
   btn.disabled = true;
   btn.textContent = 'Salvataggio…';
   closePayModal();
-  htmx.ajax('POST', '/gestionale/rinnovi/' + subId + '/paga', {
+  htmx.ajax('POST', '/gestionale/rinnovi/debito/' + debtId + '/paga', {
     target: '#renewals-table',
     swap: 'innerHTML'
   });

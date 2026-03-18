@@ -133,31 +133,20 @@ def upsert_debt_from_job(job: Job) -> None:
     debt.status = "paid" if outstanding <= Decimal("0.01") else "open"
 
 
-def upsert_debt_from_subscription(sub: "Subscription") -> Optional[DebtItem]:
-    """Create or reopen the DebtItem for the current subscription cycle."""
+def create_debt_for_period(sub: "Subscription", period_date: date) -> Optional[DebtItem]:
+    """Create a DebtItem for a specific renewal period. Returns None if already exists."""
     if sub.billing_type != BillingType.SUBSCRIPTION.value:
         return None
 
-    service_name = sub.service.name if sub.service else f"Servizio #{sub.service_id}"
-    label = f"Rinnovo {service_name} — {format_date_it(sub.renewal_date)}"
-
-    # There can be only one DebtItem per subscription (UNIQUE constraint on source_type+source_id).
-    # Reuse it across cycles: reset to open with updated amounts/label/due_date.
+    # Check if debt for this exact period already exists
     existing = DebtItem.query.filter_by(
-        source_type="subscription", source_id=sub.id
+        source_type="subscription", source_id=sub.id, due_date=period_date
     ).first()
-
     if existing:
-        if existing.status == "open":
-            return existing
-        # Reopen for the new cycle
-        existing.label = label
-        existing.due_date = sub.renewal_date
-        existing.amount_total = parse_decimal(sub.price_at_sale)
-        existing.amount_paid = Decimal("0")
-        existing.status = "open"
-        existing.customer_id = sub.customer_id
-        return existing
+        return None  # already generated
+
+    service_name = sub.service.name if sub.service else f"Servizio #{sub.service_id}"
+    label = f"Rinnovo {service_name} — {format_date_it(period_date)}"
 
     debt = DebtItem(
         customer_id=sub.customer_id,
@@ -165,13 +154,30 @@ def upsert_debt_from_subscription(sub: "Subscription") -> Optional[DebtItem]:
         source_id=sub.id,
         item_type="subscription",
         label=label,
-        due_date=sub.renewal_date,
+        due_date=period_date,
         amount_total=parse_decimal(sub.price_at_sale),
         amount_paid=Decimal("0"),
         status="open",
     )
     db.session.add(debt)
     return debt
+
+
+def upsert_debt_from_subscription(sub: "Subscription") -> Optional[DebtItem]:
+    """Backward-compatible: return the oldest open debt for a subscription, or create one for current renewal_date."""
+    if sub.billing_type != BillingType.SUBSCRIPTION.value:
+        return None
+    # Return oldest open debt
+    existing = (
+        DebtItem.query
+        .filter_by(source_type="subscription", source_id=sub.id, status="open")
+        .order_by(DebtItem.due_date.asc())
+        .first()
+    )
+    if existing:
+        return existing
+    # Fallback: create for current renewal_date
+    return create_debt_for_period(sub, sub.renewal_date or date.today())
 
 
 def sync_all_debts_from_jobs() -> None:
@@ -185,7 +191,11 @@ def sync_all_debts_from_jobs() -> None:
 # ---------------------------------------------------------------------------
 
 def process_renewals() -> list[str]:
-    """Generate DebtItems and Notifications for subscriptions whose renewal_date has arrived."""
+    """Generate DebtItems for every overdue period of each active subscription.
+
+    If a monthly subscription started in January and today is March, this will
+    create 3 separate DebtItems (Jan, Feb, Mar) and advance renewal_date to April.
+    """
     today = date.today()
     subs = Subscription.query.filter(
         Subscription.billing_type == BillingType.SUBSCRIPTION.value,
@@ -195,14 +205,16 @@ def process_renewals() -> list[str]:
 
     created = []
     for sub in subs:
-        existing_open = DebtItem.query.filter_by(
-            source_type="subscription", source_id=sub.id, status="open"
-        ).first()
-        if not existing_open:
-            debt = upsert_debt_from_subscription(sub)
+        service_name = sub.service.name if sub.service else f"Servizio #{sub.service_id}"
+        customer_name = sub.customer.company if sub.customer else f"Cliente #{sub.customer_id}"
+        interval = enum_value(sub.billing_interval)
+
+        # Generate a DebtItem for every missed period
+        safety = 0  # prevent infinite loop
+        while sub.renewal_date and sub.renewal_date <= today and safety < 120:
+            safety += 1
+            debt = create_debt_for_period(sub, sub.renewal_date)
             if debt:
-                service_name = sub.service.name if sub.service else f"Servizio #{sub.service_id}"
-                customer_name = sub.customer.company if sub.customer else f"Cliente #{sub.customer_id}"
                 notif = Notification(
                     title=f"Rinnovo: {service_name}",
                     message=f"{customer_name} — scadenza {format_date_it(sub.renewal_date)}",
@@ -211,96 +223,122 @@ def process_renewals() -> list[str]:
                     subscription_id=sub.id,
                 )
                 db.session.add(notif)
-                created.append(f"Sub #{sub.id} ({service_name})")
+                created.append(f"Sub #{sub.id} ({service_name}) — {format_date_it(sub.renewal_date)}")
+
+            # Advance renewal_date to the next period
+            sub.renewal_date = advance_renewal(sub.renewal_date, interval)
 
     db.session.commit()
     return created
 
 
 def renewals_query(payment: str = "pending") -> list[dict[str, Any]]:
-    """Return all active subscription renewals ordered by renewal_date.
+    """Return one row per DebtItem linked to active subscriptions, ordered by due_date.
 
+    This shows individual period debts (e.g. 3 rows for 3 unpaid months).
     payment: 'pending' (default) | 'paid' | '' (all)
     """
-    subs = (
-        Subscription.query
-        .filter(
-            Subscription.billing_type == BillingType.SUBSCRIPTION.value,
-            Subscription.status == "active",
-        )
-        .order_by(Subscription.renewal_date.asc())
-        .all()
-    )
+    # Build base query on DebtItems for subscriptions
+    q = DebtItem.query.filter(DebtItem.source_type == "subscription")
+    if payment == "pending":
+        q = q.filter(DebtItem.status == "open")
+    elif payment == "paid":
+        q = q.filter(DebtItem.status == "paid")
+
+    debts = q.order_by(DebtItem.due_date.asc()).all()
 
     rows = []
-    for sub in subs:
-        customer = db.session.get(Customer, sub.customer_id)
-        service = db.session.get(Service, sub.service_id)
+    # Cache subscription/customer/service lookups
+    sub_cache: dict[int, Any] = {}
+    for debt in debts:
+        sub_id = debt.source_id
+        if sub_id not in sub_cache:
+            sub = db.session.get(Subscription, sub_id)
+            if not sub or sub.status != "active":
+                sub_cache[sub_id] = None
+                continue
+            customer = db.session.get(Customer, sub.customer_id)
+            service = db.session.get(Service, sub.service_id)
+            sub_cache[sub_id] = {
+                "sub": sub,
+                "customer": customer,
+                "service": service,
+            }
+
+        cached = sub_cache.get(sub_id)
+        if not cached:
+            continue
+
+        sub = cached["sub"]
+        customer = cached["customer"]
+        service = cached["service"]
         customer_name = (customer.company if customer else "") or "-"
         service_name = (service.name if service else "") or "-"
 
-        open_debt = DebtItem.query.filter_by(
-            source_type="subscription", source_id=sub.id, status="open"
-        ).first()
-        outstanding = debt_outstanding(open_debt.amount_total, open_debt.amount_paid) if open_debt else Decimal("0")
-        payment_status = "paid" if (open_debt is not None and outstanding <= Decimal("0.01")) else "pending"
-
-        if payment and payment_status != payment:
-            continue
+        outstanding = debt_outstanding(debt.amount_total, debt.amount_paid)
+        ps = "paid" if outstanding <= Decimal("0.01") else "pending"
 
         rows.append({
             "sub_id": sub.id,
+            "debt_id": debt.id,
             "customer_id": sub.customer_id,
             "customer_name": customer_name,
             "customer_email": customer.email if customer else "",
             "service_name": service_name,
-            "renewal_date": sub.renewal_date,
-            "renewal_year": sub.renewal_date.year if sub.renewal_date else 0,
+            "renewal_date": debt.due_date,
+            "renewal_year": debt.due_date.year if debt.due_date else 0,
             "billing_interval": sub.billing_interval,
             "interval_label": BILLING_INTERVAL_LABELS.get(enum_value(sub.billing_interval), "-"),
-            "price": parse_decimal(sub.price_at_sale),
-            "payment_status": payment_status,
-            "debt_id": open_debt.id if open_debt else None,
+            "price": parse_decimal(debt.amount_total),
+            "payment_status": ps,
         })
     return rows
 
 
 def dashboard_renewals_widget() -> list[dict[str, Any]]:
-    """Renewals due this month + overdue."""
+    """Open subscription debts due this month or overdue."""
     today = date.today()
     end_of_month = today.replace(day=1) + relativedelta(months=1) - relativedelta(days=1)
 
-    subs = (
-        Subscription.query
+    debts = (
+        DebtItem.query
         .filter(
-            Subscription.billing_type == BillingType.SUBSCRIPTION.value,
-            Subscription.status == "active",
-            Subscription.renewal_date <= end_of_month,
+            DebtItem.source_type == "subscription",
+            DebtItem.status == "open",
+            DebtItem.due_date <= end_of_month,
         )
-        .order_by(Subscription.renewal_date.asc())
+        .order_by(DebtItem.due_date.asc())
         .all()
     )
 
     rows = []
-    for sub in subs:
-        customer = db.session.get(Customer, sub.customer_id)
-        service = db.session.get(Service, sub.service_id)
-        open_debt = DebtItem.query.filter_by(
-            source_type="subscription", source_id=sub.id, status="open"
-        ).first()
-        outstanding = debt_outstanding(open_debt.amount_total, open_debt.amount_paid) if open_debt else Decimal("0")
-        payment_status = "paid" if (open_debt is not None and outstanding <= Decimal("0.01")) else "pending"
+    sub_cache: dict[int, Any] = {}
+    for debt in debts:
+        sub_id = debt.source_id
+        if sub_id not in sub_cache:
+            sub = db.session.get(Subscription, sub_id)
+            if not sub or sub.status != "active":
+                sub_cache[sub_id] = None
+                continue
+            customer = db.session.get(Customer, sub.customer_id)
+            service = db.session.get(Service, sub.service_id)
+            sub_cache[sub_id] = {"sub": sub, "customer": customer, "service": service}
 
+        cached = sub_cache.get(sub_id)
+        if not cached:
+            continue
+
+        outstanding = debt_outstanding(debt.amount_total, debt.amount_paid)
         rows.append({
-            "sub_id": sub.id,
-            "customer_id": sub.customer_id,
-            "customer_name": (customer.company if customer else "") or "-",
-            "service_name": (service.name if service else "") or "-",
-            "renewal_date": sub.renewal_date,
-            "price": parse_decimal(sub.price_at_sale),
-            "payment_status": payment_status,
-            "debt_id": open_debt.id if open_debt else None,
-            "overdue": sub.renewal_date < today,
+            "sub_id": sub_id,
+            "debt_id": debt.id,
+            "customer_id": cached["sub"].customer_id,
+            "customer_name": (cached["customer"].company if cached["customer"] else "") or "-",
+            "service_name": (cached["service"].name if cached["service"] else "") or "-",
+            "renewal_date": debt.due_date,
+            "price": parse_decimal(debt.amount_total),
+            "payment_status": "paid" if outstanding <= Decimal("0.01") else "pending",
+            "overdue": debt.due_date < today if debt.due_date else False,
         })
     return rows
 
@@ -621,16 +659,12 @@ def add_payment(
         new_outstanding = debt_outstanding(debt.amount_total, debt.amount_paid)
         if new_outstanding <= Decimal("0.01"):
             debt.status = "paid"
-            # If subscription debt: advance renewal_date and reset payment cycle
+            # If subscription debt: update last_paid_at
+            # (renewal_date advancement is handled by process_renewals)
             if debt.source_type == "subscription" and debt.source_id:
                 sub = db.session.get(Subscription, debt.source_id)
                 if sub and sub.billing_type == BillingType.SUBSCRIPTION.value:
                     sub.last_paid_at = payment_date or date.today()
-                    sub.payment_status = PaymentStatus.PENDING.value
-                    if sub.renewal_date:
-                        sub.renewal_date = advance_renewal(
-                            sub.renewal_date, enum_value(sub.billing_interval)
-                        )
 
         db.session.commit()
         was_capped = amount_to_pay < amount_dec
