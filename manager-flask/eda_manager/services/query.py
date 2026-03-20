@@ -1027,19 +1027,15 @@ def _sync_subscriptions_for_job(job: Job, service_ids: list[int]) -> None:
             existing.status = "active"
             existing.customer_id = job.customer_id
         else:
-            interval = enum_value(svc.billing_interval)
-            if interval == BillingInterval.MONTHLY.value:
-                renewal = start + relativedelta(months=1)
-            elif interval == BillingInterval.SEMIANNUAL.value:
-                renewal = start + relativedelta(months=6)
-            else:
-                renewal = start + relativedelta(years=1)
+            # renewal_date starts at the same date as the job start,
+            # so the first period is immediately due and process_renewals
+            # will generate a DebtItem for it.
             sub = Subscription(
                 customer_id=job.customer_id,
                 job_id=job.id,
                 service_id=svc.id,
                 purchase_date=start,
-                renewal_date=renewal,
+                renewal_date=start,
                 billing_type=BillingType.SUBSCRIPTION.value,
                 billing_interval=enum_value(svc.billing_interval),
                 price_at_sale=parse_decimal(svc.price),

@@ -546,6 +546,8 @@ def subscription_cancel(sub_id: int):
 @bp.get("/gestionale/rinnovi")
 @require_admin
 def renewals_page():
+    # Auto-generate DebtItems for any overdue periods before displaying
+    process_renewals()
     payment = request.args.get("payment", "pending")
     rows = renewals_query(payment=payment)
     return render_template(
@@ -559,6 +561,7 @@ def renewals_page():
 @bp.get("/gestionale/rinnovi/table")
 @require_admin
 def renewals_table():
+    process_renewals()
     payment = request.args.get("payment", "pending")
     rows = renewals_query(payment=payment)
     return render_template("partials/renewals_table.html", rows=rows)
