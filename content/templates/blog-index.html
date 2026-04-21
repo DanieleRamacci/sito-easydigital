@@ -189,10 +189,54 @@
       .eda-layout { grid-template-columns: 1fr; }
       .eda-side { position: static; }
     }
+    .eda-search-wrap {
+      margin-top: 20px;
+      position: relative;
+      max-width: 520px;
+    }
+    .eda-search-wrap svg {
+      position: absolute;
+      left: 14px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: #94a3b8;
+      pointer-events: none;
+    }
+    .eda-search-input {
+      width: 100%;
+      padding: 12px 14px 12px 42px;
+      border: 1px solid #d5e1d8;
+      border-radius: 10px;
+      font-size: 1rem;
+      background: #fff;
+      color: #0f172a;
+      outline: none;
+      box-sizing: border-box;
+      transition: border-color 0.2s;
+    }
+    .eda-search-input:focus {
+      border-color: #3dae63;
+      box-shadow: 0 0 0 3px rgba(61,174,99,0.12);
+    }
+    .eda-search-input::placeholder {
+      color: #94a3b8;
+    }
+    .eda-no-results {
+      display: none;
+      padding: 20px 16px;
+      color: #64748b;
+      text-align: center;
+      font-size: 1rem;
+      border: 1px dashed #cbd5e1;
+      border-radius: 12px;
+      background: #fff;
+      margin-top: 14px;
+    }
     @media (max-width: 760px) {
       .eda-grid { grid-template-columns: 1fr; }
       .eda-blog-hero h1 { font-size: 1.75rem; }
       .eda-blog-hub { padding: 20px 14px 50px; }
+      .eda-search-wrap { max-width: 100%; }
     }
   </style>
 
@@ -200,6 +244,10 @@
     <h1>__BLOG_INDEX_TITLE__</h1>
     <p>__BLOG_INDEX_INTRO__</p>
     <div class="eda-meta">Articoli pubblicati: __BLOG_TOTAL_COUNT__ • Aggiornato: __BLOG_UPDATED_AT__</div>
+    <div class="eda-search-wrap">
+      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input type="text" class="eda-search-input" placeholder="Cerca tra gli articoli..." aria-label="Cerca articoli">
+    </div>
   </section>
 
   <div class="eda-layout">
@@ -235,4 +283,38 @@
       </div>
     </aside>
   </div>
+  <div class="eda-no-results" id="edaNoResults">Nessun articolo trovato per la tua ricerca.</div>
+  <script>
+  (function(){
+    var input = document.querySelector('.eda-search-input');
+    var cards = document.querySelectorAll('.eda-card');
+    var sections = document.querySelectorAll('.eda-main section');
+    var noResults = document.getElementById('edaNoResults');
+
+    input.addEventListener('input', function(){
+      var q = this.value.toLowerCase().trim();
+      var visibleCount = 0;
+
+      cards.forEach(function(card){
+        var title = (card.querySelector('h3') || {}).textContent || '';
+        var desc = (card.querySelector('p') || {}).textContent || '';
+        var cat = (card.querySelector('.eda-cat') || {}).textContent || '';
+        var match = !q || title.toLowerCase().indexOf(q) !== -1
+                       || desc.toLowerCase().indexOf(q) !== -1
+                       || cat.toLowerCase().indexOf(q) !== -1;
+        card.style.display = match ? '' : 'none';
+        if(match) visibleCount++;
+      });
+
+      sections.forEach(function(sec){
+        var visible = sec.querySelectorAll('.eda-card');
+        var any = false;
+        visible.forEach(function(c){ if(c.style.display !== 'none') any = true; });
+        sec.style.display = any ? '' : 'none';
+      });
+
+      noResults.style.display = (q && visibleCount === 0) ? 'block' : 'none';
+    });
+  })();
+  </script>
 </div>
